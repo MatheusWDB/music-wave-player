@@ -1,23 +1,25 @@
 import 'package:flutter/material.dart';
+import 'package:music_wave_player/models/configuration.dart';
+import 'package:provider/provider.dart';
 
-class PathComponent extends StatefulWidget {
+class PathComponent extends StatelessWidget {
   const PathComponent({super.key});
-
-  @override
-  State<PathComponent> createState() => _PathComponentState();
-}
-
-class _PathComponentState extends State<PathComponent> {
-  String? path;
 
   @override
   Widget build(BuildContext context) {
     return Text(
-      path == null ? "Nenhum diretório selecionado." : path!,
+      context.watch<Configuration>().rootDirectory == null
+          ? "Nenhum diretório selecionado."
+          : context.watch<Configuration>().rootDirectory!,
       maxLines: 2,
+      overflow: TextOverflow.ellipsis,
       style: TextStyle(
-        color: path == null ? Colors.grey[600] : null,
-        fontStyle: path == null ? FontStyle.italic : FontStyle.normal,
+        color: context.watch<Configuration>().rootDirectory == null
+            ? Colors.grey[600]
+            : null,
+        fontStyle: context.watch<Configuration>().rootDirectory == null
+            ? FontStyle.italic
+            : FontStyle.normal,
       ),
     );
   }

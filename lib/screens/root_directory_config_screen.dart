@@ -1,9 +1,20 @@
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:music_wave_player/components/root_directory_config_components/indexing_component.dart';
 import 'package:music_wave_player/components/root_directory_config_components/path_component.dart';
+import 'package:music_wave_player/models/configuration.dart';
+import 'package:provider/provider.dart';
 
 class RootDirectoryConfigScreen extends StatelessWidget {
   const RootDirectoryConfigScreen({super.key});
+
+  Future<void> _pickRootDirectory(BuildContext context) async {
+    String? selectedDirectory = await FilePicker.platform.getDirectoryPath();
+
+    if (selectedDirectory != null && context.mounted) {
+      context.read<Configuration>().rootDirectory = selectedDirectory;
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -88,7 +99,7 @@ class RootDirectoryConfigScreen extends StatelessWidget {
                           borderRadius: BorderRadius.circular(8.0),
                         ),
                       ),
-                      onPressed: () {},
+                      onPressed: () async => _pickRootDirectory(context),
                       child: Text(
                         "Escolher Pasta de Música",
                         style: TextStyle(
