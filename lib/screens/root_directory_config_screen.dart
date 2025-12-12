@@ -3,12 +3,43 @@ import 'package:flutter/material.dart';
 import 'package:music_wave_player/components/root_directory_config_components/indexing_component.dart';
 import 'package:music_wave_player/components/root_directory_config_components/path_component.dart';
 import 'package:music_wave_player/models/configuration.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:provider/provider.dart';
 
 class RootDirectoryConfigScreen extends StatelessWidget {
   const RootDirectoryConfigScreen({super.key});
 
   Future<void> _pickRootDirectory(BuildContext context) async {
+    PermissionStatus status = await Permission.audio.request();
+
+    if (!status.isGranted) {
+      if (context.mounted) {
+        if (status.isPermanentlyDenied) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: const Text(
+                "Permissão de Armazenamento permanentemente negada. Abra as Configurações do App.",
+              ),
+              action: SnackBarAction(
+                label: "Configurações",
+                onPressed:
+                    openAppSettings,
+              ),
+            ),
+          );
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text(
+                "Permissão de Armazenamento negada. Necessária para a indexação.",
+              ),
+            ),
+          );
+        }
+      }
+      return;
+    }
+
     String? selectedDirectory = await FilePicker.platform.getDirectoryPath();
 
     if (selectedDirectory != null && context.mounted) {
