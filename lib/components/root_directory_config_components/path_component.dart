@@ -11,7 +11,7 @@ class PathComponent extends StatelessWidget {
       context.watch<Configuration>().rootDirectory == null
           ? "Nenhum diretório selecionado."
           : context.watch<Configuration>().rootDirectory!,
-      maxLines: 2,
+      maxLines: 3,
       overflow: TextOverflow.ellipsis,
       style: TextStyle(
         color: context.watch<Configuration>().rootDirectory == null
