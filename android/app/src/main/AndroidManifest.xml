@@ -1,6 +1,11 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"/>
+
+    <uses-permission android:name="android.permission.READ_MEDIA_AUDIO"/>
+
     <application
-        android:label="music_wave_player"
+        android:label="MusicWave Player"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity
