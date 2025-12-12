@@ -51,7 +51,7 @@ class MyApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      title: 'Flutter Demo',
+      title: 'MusicWave Player',
       theme: ThemeData(
         brightness: Brightness.dark,
 
