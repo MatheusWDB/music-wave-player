@@ -139,13 +139,15 @@ class FullPlayerScreen extends StatelessWidget {
                 ),
                 IconButton(
                   icon: Icon(
-                    Icons.repeat,
-                    color: config.repeatMode != 'Off'
+                    config.repeatMode == 'One'
+                        ? Icons.repeat_one
+                        : Icons.repeat,
+                    color: config.repeatMode == 'Off'
                         ? colorScheme.primary
                         : colorScheme.onSurface,
                   ),
                   iconSize: 32,
-                  onPressed: () {},
+                  onPressed: config.toggleRepeatMode,
                 ),
               ],
             ),

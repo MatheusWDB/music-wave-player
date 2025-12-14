@@ -251,13 +251,18 @@ class Configuration with ChangeNotifier, DiagnosticableTreeMixin {
     }
   }
 
-  void playNextTrack() {
+  void playNextTrack({bool manualSkip = true}) {
     if (_playbackQueue.isEmpty) return;
+
+    if (_repeatMode == 'One' && !manualSkip) {
+      playTrack(_playbackQueue[_currentQueueIndex]);
+      return;
+    }
 
     int nextIndex = _currentQueueIndex + 1;
 
     if (nextIndex >= _playbackQueue.length) {
-      if (_repeatMode == 'All') {
+      if (_repeatMode == 'All' || _repeatMode == 'One') {
         nextIndex = 0;
       } else {
         _isPlaying = false;
@@ -294,6 +299,17 @@ class Configuration with ChangeNotifier, DiagnosticableTreeMixin {
   void toggleShuffle() {
     _isShuffleActive = !_isShuffleActive;
     _regenerateQueue();
+    notifyListeners();
+  }
+
+  void toggleRepeatMode() {
+    if (_repeatMode == 'Off') {
+      _repeatMode = 'All';
+    } else if (_repeatMode == 'All') {
+      _repeatMode = 'One';
+    } else {
+      _repeatMode = 'Off';
+    }
     notifyListeners();
   }
 
