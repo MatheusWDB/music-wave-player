@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:music_wave_player/models/configuration.dart';
-import 'package:music_wave_player/screens/root_directory_config_screen.dart';
+import 'package:music_wave_player/screens/library_screen.dart';
 import 'package:provider/provider.dart';
 
 const Color colorBgDark = Color(0xFF0D1B2A);
@@ -74,7 +74,7 @@ class MyApp extends StatelessWidget {
           foregroundColor: colorAccent,
         ),
       ),
-      home: RootDirectoryConfigScreen(),
+      home: LibraryScreen(),
     );
   }
 }
