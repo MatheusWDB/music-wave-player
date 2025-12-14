@@ -22,6 +22,7 @@ class Configuration with ChangeNotifier, DiagnosticableTreeMixin {
   String _repeatMode;
   DateTime? _sleepTimerEnd;
   bool _timerIsPaused;
+  bool _isPlaying = false;
 
   Configuration._(
     this._rootDirectory,
@@ -70,6 +71,7 @@ class Configuration with ChangeNotifier, DiagnosticableTreeMixin {
   String get repeatMode => _repeatMode;
   DateTime? get sleepTimerEnd => _sleepTimerEnd;
   bool get timerIsPaused => _timerIsPaused;
+  bool get isPlaying => _isPlaying;
 
   set rootDirectory(String path) {
     if (_rootDirectory == path) return;
@@ -184,6 +186,33 @@ class Configuration with ChangeNotifier, DiagnosticableTreeMixin {
           }
         }
       }
+    }
+  }
+
+  
+  void playTrack(int? musicId) {
+    if (_lastPlayedMusicId != musicId) {
+      _lastPlayedMusicId = musicId;
+      _lastSeekPositionMs = 0; 
+    }
+    _isPlaying = true;
+    notifyListeners();
+    // Em um app real, você chamaria o player de áudio aqui para carregar e iniciar a faixa.
+  }
+
+  
+  void togglePlayPause() {
+    if (_lastPlayedMusicId == null && _indexedTracks.isNotEmpty) {
+      playTrack(_indexedTracks.first.id);
+      return;
+    }
+
+    if (_lastPlayedMusicId != null) {
+      _isPlaying = !_isPlaying;
+      notifyListeners();
+
+      // Em um app real:
+      // if (_isPlaying) { player.resume(); } else { player.pause(); }
     }
   }
 

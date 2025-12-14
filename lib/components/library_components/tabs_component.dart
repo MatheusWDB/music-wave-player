@@ -18,11 +18,11 @@ class _TabBarComponentState extends State<TabsComponent>
   int _activeMenu = 0;
   String _subTitle = "Todas as Músicas";
 
-  Widget _childContet(List<MusicTrack> tracks) {
+  Widget _childContet(List<MusicTrack> tracks, Function(int) onTrackTap) {
     return switch (_activeMenu) {
       0 => (() {
         _subTitle = 'Todas as Músicas';
-        return MusicsTab(tracks: tracks);
+        return MusicsTab(tracks: tracks, onTrackTap: onTrackTap);
       })(),
       1 => (() {
         _subTitle = 'Playlists';
@@ -30,11 +30,11 @@ class _TabBarComponentState extends State<TabsComponent>
       })(),
       2 => (() {
         _subTitle = 'Artistas';
-        return MusicsTab(tracks: tracks);
+        return MusicsTab(tracks: tracks, onTrackTap: onTrackTap);
       })(),
       _ => (() {
         _subTitle = 'Álbuns';
-        return MusicsTab(tracks: tracks);
+        return MusicsTab(tracks: tracks, onTrackTap: onTrackTap);
       })(),
     };
   }
@@ -51,7 +51,7 @@ class _TabBarComponentState extends State<TabsComponent>
       builder: (context, config, child) {
         final List<MusicTrack> tracks = config.indexedTracks;
         final ColorScheme colorScheme = Theme.of(context).colorScheme;
-        Widget childContent = _childContet(tracks);
+        Widget childContent = _childContet(tracks, config.playTrack);
 
         return Column(
           children: [
@@ -63,7 +63,7 @@ class _TabBarComponentState extends State<TabsComponent>
                 setState(() {
                   _activeMenu = value;
 
-                  childContent = _childContet(tracks);
+                  childContent = _childContet(tracks, config.playTrack);
                 });
               },
               tabs: [
@@ -84,7 +84,8 @@ class _TabBarComponentState extends State<TabsComponent>
             ),
             Expanded(
               child: Padding(
-padding: const EdgeInsets.symmetric(horizontal: 18.0),                child: Column(
+                padding: const EdgeInsets.symmetric(horizontal: 18.0),
+                child: Column(
                   children: [
                     Text(_subTitle),
                     tracks.isNotEmpty

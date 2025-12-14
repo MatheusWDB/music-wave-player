@@ -3,8 +3,9 @@ import 'package:music_wave_player/models/music_track.dart';
 
 class MusicsTab extends StatelessWidget {
   final List<MusicTrack> tracks;
+  final Function(int) onTrackTap;
 
-  const MusicsTab({super.key, required this.tracks});
+  const MusicsTab({super.key, required this.tracks, required this.onTrackTap});
 
   @override
   Widget build(BuildContext context) {
@@ -30,7 +31,9 @@ class MusicsTab extends StatelessWidget {
                   ],
                 ),
                 IconButton(
-                  onPressed: () {},
+                  onPressed: () {
+                    onTrackTap(tracks[index].id!);
+                  },
                   icon: Icon(Icons.queue_music_outlined),
                 ),
               ],

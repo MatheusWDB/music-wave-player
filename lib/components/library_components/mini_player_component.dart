@@ -12,21 +12,21 @@ class MiniPlayerComponent extends StatelessWidget {
     final config = context.watch<Configuration>();
 
     MusicTrack? currentTrack;
-    // Exemplo de música que está sendo "tocada" (baseado no estado salvo)
+
     currentTrack =
         config.lastPlayedMusicId != null && config.indexedTracks.isNotEmpty
         ? config.indexedTracks.firstWhere(
             (track) => track.id == config.lastPlayedMusicId,
-            orElse: () => config.indexedTracks.first, // Fallback
+            orElse: () => config.indexedTracks.first,
           )
         : null;
 
+    // Código temporário para enxegar o mini player
     if (currentTrack == null && config.indexedTracks.isNotEmpty) {
       currentTrack = config.indexedTracks.first;
     }
 
     if (currentTrack == null) {
-      // Se não houver faixas indexadas ou nenhuma música tocada recentemente, não mostra o player.
       return const SizedBox.shrink();
     }
 
@@ -34,13 +34,12 @@ class MiniPlayerComponent extends StatelessWidget {
       height: 65.0,
       padding: const EdgeInsets.all(10.0),
       decoration: BoxDecoration(
-        color: colorScheme.surfaceVariant,
+        color: colorScheme.surface,
         borderRadius: BorderRadius.circular(10.0),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.max,
         children: [
-          // Capa (Simulação)
           Container(
             width: 45.0,
             height: 45.0,
@@ -55,8 +54,6 @@ class MiniPlayerComponent extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 10.0),
-
-          // Detalhes da Música
           Expanded(
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
@@ -81,26 +78,20 @@ class MiniPlayerComponent extends StatelessWidget {
               ],
             ),
           ),
-
-          // Botões de Controle
           IconButton(
-            onPressed: () {
-              // Lógica para Música Anterior
-            },
+            onPressed: () {},
             icon: Icon(Icons.skip_previous, color: colorScheme.primary),
             iconSize: 28.0,
           ),
           IconButton(
             onPressed: () {
-              // Lógica para Play/Pause
+              config.togglePlayPause();
             },
-            icon: Icon(Icons.play_arrow, color: colorScheme.primary),
+            icon: Icon(config.isPlaying ? Icons.pause : Icons.play_arrow),
             iconSize: 32.0,
           ),
           IconButton(
-            onPressed: () {
-              // Lógica para Próxima Música
-            },
+            onPressed: () {},
             icon: Icon(Icons.skip_next, color: colorScheme.primary),
             iconSize: 28.0,
           ),
