@@ -254,15 +254,10 @@ class Configuration with ChangeNotifier, DiagnosticableTreeMixin {
   void playNextTrack({bool manualSkip = true}) {
     if (_playbackQueue.isEmpty) return;
 
-    if (_repeatMode == 'One' && !manualSkip) {
-      playTrack(_playbackQueue[_currentQueueIndex]);
-      return;
-    }
-
     int nextIndex = _currentQueueIndex + 1;
 
     if (nextIndex >= _playbackQueue.length) {
-      if (_repeatMode == 'All' || _repeatMode == 'One') {
+      if (_repeatMode == 'All' ) {
         nextIndex = 0;
       } else {
         _isPlaying = false;
@@ -311,6 +306,19 @@ class Configuration with ChangeNotifier, DiagnosticableTreeMixin {
       _repeatMode = 'Off';
     }
     notifyListeners();
+  }
+
+  void trackDidFinish() {
+    if (_lastPlayedMusicId == null || _playbackQueue.isEmpty) {
+      return;
+    }
+
+    if (_repeatMode == 'One') {
+      playTrack(_lastPlayedMusicId!);
+      return;
+    }
+
+    playNextTrack(manualSkip: false);
   }
 
   @override
