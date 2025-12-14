@@ -22,8 +22,7 @@ class RootDirectoryConfigScreen extends StatelessWidget {
               ),
               action: SnackBarAction(
                 label: "Configurações",
-                onPressed:
-                    openAppSettings,
+                onPressed: openAppSettings,
               ),
             ),
           );
@@ -52,8 +51,7 @@ class RootDirectoryConfigScreen extends StatelessWidget {
     ColorScheme colorScheme = Theme.of(context).colorScheme;
 
     return Scaffold(
-      body: Container(
-        padding: EdgeInsets.all(18.0),
+      body: SafeArea(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           spacing: 10.0,
