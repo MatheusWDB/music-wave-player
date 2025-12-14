@@ -24,10 +24,10 @@ class IndexingComponent extends StatelessWidget {
     double? progressValue = 0.0;
 
     if (isScanning) {
-      statusText = "Varrendo e Indexando...";
+      statusText = "Varrendo e Indexando... (${config.indexedFileCount} arquivos encontrados)";
       progressValue = null;
     } else if (isComplete) {
-      statusText = "Varredura concluída!";
+      statusText = "Varredura concluída! ${config.indexedFileCount} arquivos indexados.";
       progressValue = 1.0;
     } else if (isDirectorySet) {
       statusText = "Clique em Iniciar Varredura.";
