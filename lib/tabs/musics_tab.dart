@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:music_wave_player/models/music_track.dart';
+import 'package:music_wave_player/screens/full_player_screen.dart';
 
 class MusicsTab extends StatelessWidget {
   final List<MusicTrack> tracks;
@@ -15,7 +16,18 @@ class MusicsTab extends StatelessWidget {
       separatorBuilder: (BuildContext context, int index) =>
           const SizedBox(height: 12.0),
       itemBuilder: (context, index) => InkWell(
-        onTap: () {},
+        onTap: () {
+          final int trackId = tracks[index].id!;
+
+          onTrackTap(trackId);
+
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => FullPlayerScreen(initialTrackId: trackId),
+            ),
+          );
+        },
         child: Card(
           child: Padding(
             padding: const EdgeInsets.all(10.0),
@@ -27,7 +39,6 @@ class MusicsTab extends StatelessWidget {
                   children: [
                     Text(tracks[index].title),
                     Text(tracks[index].artist),
-                    Text(tracks[index].album),
                   ],
                 ),
                 IconButton(

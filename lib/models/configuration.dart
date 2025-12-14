@@ -98,7 +98,17 @@ class Configuration with ChangeNotifier, DiagnosticableTreeMixin {
   }
 
   void _initializeQueue(List<MusicTrack> tracks) {
-    _playbackQueue = tracks.map((t) => t.id!).toList();
+    _regenerateQueue();
+  }
+
+  void _regenerateQueue() {
+    final List<int> allTrackIds = _indexedTracks.map((t) => t.id!).toList();
+
+    if (_isShuffleActive) {
+      _playbackQueue = List.of(allTrackIds)..shuffle();
+    } else {
+      _playbackQueue = allTrackIds;
+    }
 
     if (_lastPlayedMusicId != null) {
       _currentQueueIndex = _playbackQueue.indexOf(_lastPlayedMusicId!);
@@ -215,7 +225,7 @@ class Configuration with ChangeNotifier, DiagnosticableTreeMixin {
     if (newIndex == -1) return;
 
     if (_lastPlayedMusicId != musicId) {
-      _initializeQueue(_indexedTracks);
+      _regenerateQueue();
       _currentQueueIndex = _playbackQueue.indexOf(musicId);
 
       _lastPlayedMusicId = musicId;
@@ -279,6 +289,12 @@ class Configuration with ChangeNotifier, DiagnosticableTreeMixin {
     final int prevMusicId = _playbackQueue[prevIndex];
     _currentQueueIndex = prevIndex;
     playTrack(prevMusicId);
+  }
+
+  void toggleShuffle() {
+    _isShuffleActive = !_isShuffleActive;
+    _regenerateQueue();
+    notifyListeners();
   }
 
   @override
