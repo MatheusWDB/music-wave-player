@@ -25,6 +25,8 @@ class Configuration with ChangeNotifier, DiagnosticableTreeMixin {
   bool _isPlaying = false;
   List<int> _playbackQueue = [];
   int _currentQueueIndex = -1;
+  int _currentPositionMs = 0;
+  int _trackDurationMs = 0;
 
   Configuration._(
     this._rootDirectory,
@@ -77,6 +79,19 @@ class Configuration with ChangeNotifier, DiagnosticableTreeMixin {
   bool get timerIsPaused => _timerIsPaused;
   bool get isPlaying => _isPlaying;
   int get currentQueueIndex => _currentQueueIndex;
+  int get currentPositionMs => _currentPositionMs;
+  int get trackDurationMs => _trackDurationMs;
+
+  MusicTrack? get currentTrack {
+    if (_lastPlayedMusicId == null) return null;
+    try {
+      return _indexedTracks.firstWhere(
+        (track) => track.id == _lastPlayedMusicId,
+      );
+    } catch (_) {
+      return null;
+    }
+  }
 
   set rootDirectory(String path) {
     if (_rootDirectory == path) return;
@@ -85,6 +100,25 @@ class Configuration with ChangeNotifier, DiagnosticableTreeMixin {
     _indexingStatus = IndexingStatus.idle;
     notifyListeners();
     _saveRootDirectory(path);
+  }
+
+  void updateCurrentPosition(int positionMs) {
+    if (_currentPositionMs != positionMs) {
+      _currentPositionMs = positionMs;
+      notifyListeners();
+    }
+  }
+
+  void updateTrackDuration(int durationMs) {
+    if (_trackDurationMs != durationMs) {
+      _trackDurationMs = durationMs;
+      notifyListeners();
+    }
+  }
+
+  void seekTo(int positionMs) {
+    _currentPositionMs = positionMs;
+    notifyListeners();
   }
 
   Future<void> _saveLastScanDate(DateTime date) async {
@@ -230,6 +264,8 @@ class Configuration with ChangeNotifier, DiagnosticableTreeMixin {
 
       _lastPlayedMusicId = musicId;
       _lastSeekPositionMs = 0;
+      _currentPositionMs = 0;
+      _trackDurationMs = 0;
     }
 
     _isPlaying = true;
@@ -257,7 +293,7 @@ class Configuration with ChangeNotifier, DiagnosticableTreeMixin {
     int nextIndex = _currentQueueIndex + 1;
 
     if (nextIndex >= _playbackQueue.length) {
-      if (_repeatMode == 'All' ) {
+      if (_repeatMode == 'All') {
         nextIndex = 0;
       } else {
         _isPlaying = false;

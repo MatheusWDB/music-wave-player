@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:music_wave_player/models/configuration.dart';
-import 'package:music_wave_player/models/music_track.dart';
 import 'package:provider/provider.dart';
 
 class FullPlayerScreen extends StatelessWidget {
@@ -12,20 +11,16 @@ class FullPlayerScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final config = context.watch<Configuration>();
     final colorScheme = Theme.of(context).colorScheme;
-
-    final int? activeTrackId = initialTrackId ?? config.lastPlayedMusicId;
-
-    MusicTrack? currentTrack;
-
-    if (activeTrackId != null && config.indexedTracks.isNotEmpty) {
-      try {
-        currentTrack = config.indexedTracks.firstWhere(
-          (track) => track.id == activeTrackId,
-        );
-      } catch (_) {}
-    }
+    final currentTrack = config.currentTrack;
+    final activeTrackId = config.lastPlayedMusicId;
 
     if (currentTrack == null) {
+      if (initialTrackId != null && activeTrackId != initialTrackId) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          config.playTrack(initialTrackId!);
+        });
+        return const Center(child: CircularProgressIndicator());
+      }
       return Scaffold(
         appBar: AppBar(
           title: const Text('Player'),
@@ -40,11 +35,19 @@ class FullPlayerScreen extends StatelessWidget {
       );
     }
 
-    if (initialTrackId != null && activeTrackId != config.lastPlayedMusicId) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        config.playTrack(initialTrackId!);
-      });
+    String formatDuration(int ms) {
+      final Duration duration = Duration(milliseconds: ms);
+      String twoDigits(int n) => n.toString().padLeft(2, "0");
+      final minutes = twoDigits(duration.inMinutes.remainder(60));
+      final seconds = twoDigits(duration.inSeconds.remainder(60));
+      return "$minutes:$seconds";
     }
+
+    final currentPositionFormatted = formatDuration(config.currentPositionMs);
+    final totalDurationFormatted = formatDuration(config.trackDurationMs);
+    final progressValue = config.trackDurationMs > 0
+        ? config.currentPositionMs / config.trackDurationMs
+        : 0.0;
 
     return Scaffold(
       appBar: AppBar(
@@ -92,14 +95,23 @@ class FullPlayerScreen extends StatelessWidget {
               overflow: TextOverflow.ellipsis,
             ),
             const SizedBox(height: 32),
-            LinearProgressIndicator(value: 0.13, color: colorScheme.primary),
+            LinearProgressIndicator(
+              value: progressValue,
+              color: colorScheme.primary,
+            ),
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 4.0),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Text('0:30', style: TextStyle(color: colorScheme.onSurface)),
-                  Text('3:45', style: TextStyle(color: colorScheme.onSurface)),
+                  Text(
+                    currentPositionFormatted,
+                    style: TextStyle(color: colorScheme.onSurface),
+                  ),
+                  Text(
+                    totalDurationFormatted,
+                    style: TextStyle(color: colorScheme.onSurface),
+                  ),
                 ],
               ),
             ),
