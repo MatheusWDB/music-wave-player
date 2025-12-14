@@ -1,4 +1,7 @@
+import 'package:music_wave_player/data/music_database.dart';
+
 class MusicTrack {
+  final int? id;
   final String path;
 
   final String title;
@@ -14,6 +17,7 @@ class MusicTrack {
   ];
 
   MusicTrack({
+    this.id,
     required this.path,
     required this.title,
     required this.artist,
@@ -28,5 +32,25 @@ class MusicTrack {
       }
     }
     return false;
+  }
+
+  Map<String, Object?> toMap() => {
+    MusicDatabase.columnPath: path,
+    MusicDatabase.columnTitle: title,
+    MusicDatabase.columnArtist: artist,
+    MusicDatabase.columnAlbum: album,
+  };
+
+  static MusicTrack fromMap(Map<String, Object?> map) => MusicTrack(
+    id: map[MusicDatabase.columnId] as int?,
+    path: map[MusicDatabase.columnPath] as String,
+    title: map[MusicDatabase.columnTitle] as String,
+    artist: map[MusicDatabase.columnArtist] as String,
+    album: map[MusicDatabase.columnAlbum] as String,
+  );
+
+  @override
+  String toString() {
+    return "MusicTrack: {id: $id, path: $path, title: $title, artist: $artist, album: $album}";
   }
 }
