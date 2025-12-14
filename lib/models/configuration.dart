@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:audio_service/audio_service.dart';
 import 'package:flutter/foundation.dart';
 import 'package:music_wave_player/data/music_database.dart';
 import 'package:music_wave_player/models/music_track.dart';
@@ -27,6 +28,7 @@ class Configuration with ChangeNotifier, DiagnosticableTreeMixin {
   int _currentQueueIndex = -1;
   int _currentPositionMs = 0;
   int _trackDurationMs = 0;
+  AudioHandler? _audioHandler;
 
   Configuration._(
     this._rootDirectory,
@@ -81,6 +83,7 @@ class Configuration with ChangeNotifier, DiagnosticableTreeMixin {
   int get currentQueueIndex => _currentQueueIndex;
   int get currentPositionMs => _currentPositionMs;
   int get trackDurationMs => _trackDurationMs;
+  String? get currentTrackPath => currentTrack?.path;
 
   MusicTrack? get currentTrack {
     if (_lastPlayedMusicId == null) return null;
@@ -102,6 +105,14 @@ class Configuration with ChangeNotifier, DiagnosticableTreeMixin {
     _saveRootDirectory(path);
   }
 
+  set audioHandler(AudioHandler handler) {
+    _audioHandler = handler;
+  }
+
+  set lastSeekPositionMs(int positionMs) {
+    _lastSeekPositionMs = positionMs;
+  }
+
   void updateCurrentPosition(int positionMs) {
     if (_currentPositionMs != positionMs) {
       _currentPositionMs = positionMs;
@@ -117,8 +128,8 @@ class Configuration with ChangeNotifier, DiagnosticableTreeMixin {
   }
 
   void seekTo(int positionMs) {
-    _currentPositionMs = positionMs;
-    notifyListeners();
+    final Duration position = Duration(milliseconds: positionMs);
+    _audioHandler?.seek(position);
   }
 
   Future<void> _saveLastScanDate(DateTime date) async {
@@ -266,10 +277,12 @@ class Configuration with ChangeNotifier, DiagnosticableTreeMixin {
       _lastSeekPositionMs = 0;
       _currentPositionMs = 0;
       _trackDurationMs = 0;
+      _audioHandler?.customAction('loadTrack', {'path': currentTrackPath});
     }
 
     _isPlaying = true;
     notifyListeners();
+    _audioHandler?.play();
   }
 
   void togglePlayPause() {
@@ -284,6 +297,12 @@ class Configuration with ChangeNotifier, DiagnosticableTreeMixin {
     if (_lastPlayedMusicId != null) {
       _isPlaying = !_isPlaying;
       notifyListeners();
+    }
+
+    if (_isPlaying) {
+      _audioHandler?.play();
+    } else {
+      _audioHandler?.pause();
     }
   }
 
