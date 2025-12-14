@@ -23,6 +23,8 @@ class Configuration with ChangeNotifier, DiagnosticableTreeMixin {
   DateTime? _sleepTimerEnd;
   bool _timerIsPaused;
   bool _isPlaying = false;
+  List<int> _playbackQueue = [];
+  int _currentQueueIndex = -1;
 
   Configuration._(
     this._rootDirectory,
@@ -56,7 +58,9 @@ class Configuration with ChangeNotifier, DiagnosticableTreeMixin {
     );
 
     await config.loadIndexedTracks();
-
+    if (config._indexedTracks.isNotEmpty) {
+      config._initializeQueue(config._indexedTracks);
+    }
     return config;
   }
 
@@ -72,6 +76,7 @@ class Configuration with ChangeNotifier, DiagnosticableTreeMixin {
   DateTime? get sleepTimerEnd => _sleepTimerEnd;
   bool get timerIsPaused => _timerIsPaused;
   bool get isPlaying => _isPlaying;
+  int get currentQueueIndex => _currentQueueIndex;
 
   set rootDirectory(String path) {
     if (_rootDirectory == path) return;
@@ -92,12 +97,25 @@ class Configuration with ChangeNotifier, DiagnosticableTreeMixin {
     await prefs.setString(_kRootDirectoryKey, path);
   }
 
+  void _initializeQueue(List<MusicTrack> tracks) {
+    _playbackQueue = tracks.map((t) => t.id!).toList();
+
+    if (_lastPlayedMusicId != null) {
+      _currentQueueIndex = _playbackQueue.indexOf(_lastPlayedMusicId!);
+      if (_currentQueueIndex == -1) {
+        _lastPlayedMusicId = null;
+        _currentQueueIndex = -1;
+      }
+    }
+  }
+
   Future<void> loadIndexedTracks() async {
     try {
       _indexedTracks = await MusicDatabase.instance.readAllTracks();
       _indexedFileCount = _indexedTracks.length;
       if (_indexedFileCount > 0) {
         _indexingStatus = IndexingStatus.complete;
+        _initializeQueue(_indexedTracks);
       }
     } catch (e) {
       debugPrint("Erro ao carregar faixas salvas: $e");
@@ -189,31 +207,78 @@ class Configuration with ChangeNotifier, DiagnosticableTreeMixin {
     }
   }
 
-  
-  void playTrack(int? musicId) {
+  void playTrack(int musicId) {
+    final int newIndex = _indexedTracks.indexWhere(
+      (track) => track.id == musicId,
+    );
+
+    if (newIndex == -1) return;
+
     if (_lastPlayedMusicId != musicId) {
+      _initializeQueue(_indexedTracks);
+      _currentQueueIndex = _playbackQueue.indexOf(musicId);
+
       _lastPlayedMusicId = musicId;
-      _lastSeekPositionMs = 0; 
+      _lastSeekPositionMs = 0;
     }
+
     _isPlaying = true;
     notifyListeners();
-    // Em um app real, você chamaria o player de áudio aqui para carregar e iniciar a faixa.
   }
 
-  
   void togglePlayPause() {
     if (_lastPlayedMusicId == null && _indexedTracks.isNotEmpty) {
-      playTrack(_indexedTracks.first.id);
+      if (_playbackQueue.isNotEmpty) {
+        playTrack(_playbackQueue.first);
+        return;
+      }
       return;
     }
 
     if (_lastPlayedMusicId != null) {
       _isPlaying = !_isPlaying;
       notifyListeners();
-
-      // Em um app real:
-      // if (_isPlaying) { player.resume(); } else { player.pause(); }
     }
+  }
+
+  void playNextTrack() {
+    if (_playbackQueue.isEmpty) return;
+
+    int nextIndex = _currentQueueIndex + 1;
+
+    if (nextIndex >= _playbackQueue.length) {
+      if (_repeatMode == 'All') {
+        nextIndex = 0;
+      } else {
+        _isPlaying = false;
+        _currentQueueIndex = -1;
+        _lastPlayedMusicId = _playbackQueue.last;
+        notifyListeners();
+        return;
+      }
+    }
+
+    final int nextMusicId = _playbackQueue[nextIndex];
+    _currentQueueIndex = nextIndex;
+    playTrack(nextMusicId);
+  }
+
+  void playPreviousTrack() {
+    if (_playbackQueue.isEmpty) return;
+
+    int prevIndex = _currentQueueIndex - 1;
+
+    if (prevIndex < 0) {
+      if (_repeatMode == 'All') {
+        prevIndex = _playbackQueue.length - 1;
+      } else {
+        prevIndex = 0;
+      }
+    }
+
+    final int prevMusicId = _playbackQueue[prevIndex];
+    _currentQueueIndex = prevIndex;
+    playTrack(prevMusicId);
   }
 
   @override

@@ -79,19 +79,17 @@ class MiniPlayerComponent extends StatelessWidget {
             ),
           ),
           IconButton(
-            onPressed: () {},
+            onPressed: config.playPreviousTrack,
             icon: Icon(Icons.skip_previous, color: colorScheme.primary),
             iconSize: 28.0,
           ),
           IconButton(
-            onPressed: () {
-              config.togglePlayPause();
-            },
+            onPressed: config.togglePlayPause,
             icon: Icon(config.isPlaying ? Icons.pause : Icons.play_arrow),
             iconSize: 32.0,
           ),
           IconButton(
-            onPressed: () {},
+            onPressed: config.playNextTrack,
             icon: Icon(Icons.skip_next, color: colorScheme.primary),
             iconSize: 28.0,
           ),
