@@ -45,6 +45,7 @@ dependencies:
   just_audio: ^0.10.5
   audio_service: ^0.18.18
   rxdart: ^0.28.0
+  ffmpeg_kit_flutter_new: ^4.2.1
 
 dev_dependencies:
   flutter_test:

@@ -2,14 +2,127 @@ import 'dart:io';
 
 import 'package:audio_service/audio_service.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
 import 'package:music_wave_player/data/music_database.dart';
 import 'package:music_wave_player/models/music_track.dart';
+import 'package:music_wave_player/services/ffmpeg_service.dart';
+import 'package:music_wave_player/services/saf_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 const String _kRootDirectoryKey = 'rootDirectoryPath';
 const String _kLastScanDateKey = 'lastScanDate';
+const String _kLastPlayedMusicIdKey = 'lastPlayedMusicId';
+const String _kLastSeekPositionMsKey = 'lastSeekPositionMs';
 
 enum IndexingStatus { idle, scanning, complete, error }
+
+Future<List<String>> _scanDirectoryForPaths(String rootPath) async {
+  final paths = <String>[];
+  final dir = Directory(rootPath);
+  if (!await dir.exists()) return paths;
+  await for (final entity in dir.list(recursive: true, followLinks: false)) {
+    if (entity is File && MusicTrack.isSupported(entity.path)) {
+      paths.add(entity.path);
+    }
+  }
+  return paths;
+}
+
+Future<List<MusicTrack>> _buildTracksFromPaths(List<String> paths) async {
+  final tracks = <MusicTrack>[];
+  for (final path in paths) {
+    tracks.add(await _extractMetadata(path));
+  }
+  return tracks;
+}
+
+Future<MusicTrack> _extractMetadata(String path) async {
+  String title = _cleanFilename(path);
+  String artist = 'Artista Desconhecido';
+  String album = 'Álbum Desconhecido';
+  try {
+    if (path.toLowerCase().endsWith('.mp3')) {
+      final tags = await _readId3v2(File(path));
+      if (tags['title'] != null) title = tags['title']!;
+      if (tags['artist'] != null) artist = tags['artist']!;
+      if (tags['album'] != null) album = tags['album']!;
+    }
+  } catch (_) {}
+  return MusicTrack(path: path, title: title, artist: artist, album: album);
+}
+
+String _cleanFilename(String path) {
+  String name = path.split(Platform.pathSeparator).last;
+  if (name.contains('.')) name = name.substring(0, name.lastIndexOf('.'));
+  name = name.replaceFirst(RegExp(r'^\d{1,3}[\s._-]+'), '');
+  name = name.replaceAll('_', ' ').replaceAll(RegExp(r'\s+'), ' ').trim();
+  return name.isEmpty ? 'Faixa Desconhecida' : name;
+}
+
+Future<Map<String, String?>> _readId3v2(File file) async {
+  final result = <String, String?>{};
+  final raf = await file.open(mode: FileMode.read);
+  try {
+    final header = await raf.read(10);
+    if (header[0] != 0x49 || header[1] != 0x44 || header[2] != 0x33) {
+      return result;
+    }
+    final tagSize =
+        ((header[6] & 0x7F) << 21) |
+        ((header[7] & 0x7F) << 14) |
+        ((header[8] & 0x7F) << 7) |
+        (header[9] & 0x7F);
+    final tagData = await raf.read(tagSize);
+    int pos = 0;
+    while (pos + 10 <= tagData.length) {
+      final frameId = String.fromCharCodes(tagData.sublist(pos, pos + 4));
+      if (frameId == '\x00\x00\x00\x00') break;
+      final frameSize =
+          (tagData[pos + 4] << 24) |
+          (tagData[pos + 5] << 16) |
+          (tagData[pos + 6] << 8) |
+          tagData[pos + 7];
+      pos += 10;
+      if (frameSize <= 0 || pos + frameSize > tagData.length) break;
+      if (frameId == 'TIT2' || frameId == 'TPE1' || frameId == 'TALB') {
+        final encoding = tagData[pos];
+        final contentBytes = tagData.sublist(pos + 1, pos + frameSize);
+        String text;
+        if (encoding == 1 || encoding == 2) {
+          final bom = contentBytes.length >= 2
+              ? (contentBytes[0] << 8 | contentBytes[1])
+              : 0;
+          final start = (bom == 0xFFFE || bom == 0xFEFF) ? 2 : 0;
+          text = _decodeUtf16(contentBytes.sublist(start));
+        } else {
+          text = String.fromCharCodes(contentBytes.where((b) => b != 0));
+        }
+        text = text.trim();
+        if (text.isNotEmpty) {
+          if (frameId == 'TIT2') result['title'] = text;
+          if (frameId == 'TPE1') result['artist'] = text;
+          if (frameId == 'TALB') result['album'] = text;
+        }
+      }
+      pos += frameSize;
+    }
+  } finally {
+    await raf.close();
+  }
+  return result;
+}
+
+String _decodeUtf16(List<int> bytes) {
+  final buffer = StringBuffer();
+  for (int i = 0; i + 1 < bytes.length; i += 2) {
+    final cu = bytes[i] | (bytes[i + 1] << 8);
+    if (cu == 0) break;
+    buffer.writeCharCode(cu);
+  }
+  return buffer.toString();
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 class Configuration with ChangeNotifier, DiagnosticableTreeMixin {
   String? _rootDirectory;
@@ -18,55 +131,44 @@ class Configuration with ChangeNotifier, DiagnosticableTreeMixin {
   List<MusicTrack> _indexedTracks = [];
   int _indexedFileCount = 0;
   int? _lastPlayedMusicId;
-  int _lastSeekPositionMs;
-  bool _isShuffleActive;
-  String _repeatMode;
-  DateTime? _sleepTimerEnd;
-  bool _timerIsPaused;
+  int _lastSeekPositionMs = 0;
+  bool _isShuffleActive = false;
+  String _repeatMode = 'Off';
   bool _isPlaying = false;
   List<int> _playbackQueue = [];
   int _currentQueueIndex = -1;
   int _currentPositionMs = 0;
   int _trackDurationMs = 0;
   AudioHandler? _audioHandler;
+  bool _isLoading = true;
 
-  Configuration._(
-    this._rootDirectory,
-    this._lastScanDate,
-    this._lastPlayedMusicId,
-    this._lastSeekPositionMs,
-    this._isShuffleActive,
-    this._repeatMode,
-    this._sleepTimerEnd,
-    this._timerIsPaused,
-  );
+  Configuration.empty();
 
-  static Future<Configuration> loadFromStorage() async {
-    final SharedPreferences prefs = await SharedPreferences.getInstance();
+  bool get isLoading => _isLoading;
 
-    final String? savedRootDirectory = prefs.getString(_kRootDirectoryKey);
-    final int? savedLastScanTimestamp = prefs.getInt(_kLastScanDateKey);
-    final DateTime? savedLastScanDate = savedLastScanTimestamp != null
-        ? DateTime.fromMillisecondsSinceEpoch(savedLastScanTimestamp)
-        : null;
-
-    final config = Configuration._(
-      savedRootDirectory,
-      savedLastScanDate,
-      null,
-      0,
-      false,
-      'Off',
-      null,
-      false,
-    );
-
-    await config.loadIndexedTracks();
-    if (config._indexedTracks.isNotEmpty) {
-      config._initializeQueue(config._indexedTracks);
+  Future<void> loadFromStorageAsync() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      _rootDirectory = prefs.getString(_kRootDirectoryKey);
+      final ts = prefs.getInt(_kLastScanDateKey);
+      _lastScanDate = ts != null
+          ? DateTime.fromMillisecondsSinceEpoch(ts)
+          : null;
+      _lastPlayedMusicId = prefs.getInt(_kLastPlayedMusicIdKey);
+      _lastSeekPositionMs = prefs.getInt(_kLastSeekPositionMsKey) ?? 0;
+      await loadIndexedTracks();
+      if (_lastPlayedMusicId != null && currentTrackPath != null) {
+        await _audioHandler?.customAction('loadTrack', {
+          'path': currentTrackPath,
+        });
+      }
+    } finally {
+      _isLoading = false;
+      notifyListeners();
     }
-    return config;
   }
+
+  // ── Getters ───────────────────────────────────────────────────────────────
 
   String? get rootDirectory => _rootDirectory;
   DateTime? get lastScanDate => _lastScanDate;
@@ -77,28 +179,26 @@ class Configuration with ChangeNotifier, DiagnosticableTreeMixin {
   int get lastSeekPositionMs => _lastSeekPositionMs;
   bool get isShuffleActive => _isShuffleActive;
   String get repeatMode => _repeatMode;
-  DateTime? get sleepTimerEnd => _sleepTimerEnd;
-  bool get timerIsPaused => _timerIsPaused;
   bool get isPlaying => _isPlaying;
   int get currentQueueIndex => _currentQueueIndex;
   int get currentPositionMs => _currentPositionMs;
   int get trackDurationMs => _trackDurationMs;
   String? get currentTrackPath => currentTrack?.path;
+  AudioHandler? get audioHandler => _audioHandler;
 
   MusicTrack? get currentTrack {
     if (_lastPlayedMusicId == null) return null;
     try {
-      return _indexedTracks.firstWhere(
-        (track) => track.id == _lastPlayedMusicId,
-      );
+      return _indexedTracks.firstWhere((t) => t.id == _lastPlayedMusicId);
     } catch (_) {
       return null;
     }
   }
 
+  // ── Setters ───────────────────────────────────────────────────────────────
+
   set rootDirectory(String path) {
     if (_rootDirectory == path) return;
-
     _rootDirectory = path;
     _indexingStatus = IndexingStatus.idle;
     notifyListeners();
@@ -109,52 +209,192 @@ class Configuration with ChangeNotifier, DiagnosticableTreeMixin {
     _audioHandler = handler;
   }
 
-  set lastSeekPositionMs(int positionMs) {
-    _lastSeekPositionMs = positionMs;
-  }
+  set lastSeekPositionMs(int ms) => _lastSeekPositionMs = ms;
 
-  void updateCurrentPosition(int positionMs) {
-    if (_currentPositionMs != positionMs) {
-      _currentPositionMs = positionMs;
+  void syncPlayingState(bool playing) {
+    if (_isPlaying != playing) {
+      _isPlaying = playing;
       notifyListeners();
     }
   }
 
-  void updateTrackDuration(int durationMs) {
-    if (_trackDurationMs != durationMs) {
-      _trackDurationMs = durationMs;
+  void updateCurrentPosition(int ms) {
+    if (_currentPositionMs != ms) {
+      _currentPositionMs = ms;
       notifyListeners();
     }
   }
 
-  void seekTo(int positionMs) {
-    final Duration position = Duration(milliseconds: positionMs);
-    _audioHandler?.seek(position);
+  void updateTrackDuration(int ms) {
+    if (_trackDurationMs != ms) {
+      _trackDurationMs = ms;
+      notifyListeners();
+    }
   }
 
-  Future<void> _saveLastScanDate(DateTime date) async {
-    final SharedPreferences prefs = await SharedPreferences.getInstance();
-    await prefs.setInt(_kLastScanDateKey, date.millisecondsSinceEpoch);
+  void seekTo(int ms) {
+    _audioHandler?.seek(Duration(milliseconds: ms));
+  }
+
+  // ── Edição de metadados ───────────────────────────────────────────────────
+
+  /// Edita os metadados de uma faixa:
+  ///   1. Escreve no arquivo via ffmpeg (cópia temporária).
+  ///   2. Move a cópia para o arquivo original via SAF.
+  ///   3. Atualiza o banco SQLite.
+  ///   4. Atualiza a lista em memória e notifica a UI.
+  ///
+  /// [context] é necessário para exibir o diálogo de permissão SAF e snackbars.
+  /// Retorna true se tudo correu bem.
+  Future<bool> editTrack({
+    required MusicTrack track,
+    required String newTitle,
+    required String newArtist,
+    required String newAlbum,
+    required BuildContext context,
+  }) async {
+    print("Inicio");
+    // 1. Garante acesso SAF à pasta de músicas
+    String? folderUri = await SafService.ensureAccess();
+    print("Atribuiu folderUri");
+    if (folderUri == null) {
+      print("folderUri == null");
+      // Usuário cancelou o seletor ou erro
+      if (context.mounted) {
+        _showSnack(context, 'Acesso à pasta negado. Edição cancelada.');
+        print("Snack acesso negado");
+      }
+      return false;
+    }
+    print("Fim da etapa 1");
+    // 2. ffmpeg gera arquivo temporário com novos metadados
+    final tempPath = await FfmpegService.writeMetadata(
+      inputPath: track.path,
+      title: newTitle,
+      artist: newArtist,
+      album: newAlbum,
+    );
+    print("Atribuiu tempPath");
+    if (tempPath == null) {
+      print("tempPath == null");
+      if (context.mounted) {
+        _showSnack(context, 'Erro ao processar o arquivo. Tente novamente.');
+        print("Snack acesso negado");
+      }
+      return false;
+    }
+    print("Fim da etapa 2");
+    // 3. Copia o temporário de volta para a pasta original via SAF
+    final fileName = track.path.split('/').last;
+    final copied = await SafService.copyTempToSaf(
+      tempPath: tempPath,
+      targetFileName: fileName,
+      folderUri: folderUri,
+    );
+    print("Atribuiu fileName e copied");
+    // Limpa o temporário independente do resultado
+    try {
+      await File(tempPath).delete();
+      print("File(tempPath).delete()");
+    } catch (_) {print("File(tempPath).delete() catch");}
+
+    if (!copied) {
+      print("!copied");
+      if (context.mounted) {
+        _showSnack(context, 'Erro ao salvar o arquivo. Tente novamente.');
+        print("Snack acesso negado");
+      }
+      return false;
+    }
+    print("Fim da etapa 3");
+    // 4. Atualiza o banco
+    await MusicDatabase.instance.updateTrack(
+      id: track.id!,
+      title: newTitle,
+      artist: newArtist,
+      album: newAlbum,
+    );
+    print("Fim da etapa 4");
+    // 5. Atualiza a lista em memória
+    final idx = _indexedTracks.indexWhere((t) => t.id == track.id);
+    print("Atribiuiu idx");
+    if (idx != -1) {
+      print("idx != -1 ");
+      _indexedTracks[idx] = track.copyWith(
+        title: newTitle,
+        artist: newArtist,
+        album: newAlbum,
+        isEdited: true,
+      );
+      // Reaplica natural sort após edição (título pode ter mudado)
+      _indexedTracks.sort(
+        (a, b) => MusicDatabase.naturalCompare(
+          a.title.toLowerCase(),
+          b.title.toLowerCase(),
+        ),
+      );
+      notifyListeners();
+    }
+    print("Fim da etapa 5");
+    // 6. Atualiza o mediaItem do AudioHandler se for a faixa tocando agora
+    if (_lastPlayedMusicId == track.id) {
+      await _audioHandler?.customAction('loadTrack', {'path': track.path});
+    }
+
+    if (context.mounted) {
+      _showSnack(context, 'Informações salvas com sucesso!', isSuccess: true);
+    }
+    return true;
+  }
+
+  void _showSnack(
+    BuildContext context,
+    String message, {
+    bool isSuccess = false,
+  }) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: isSuccess
+            ? Theme.of(context).colorScheme.primary
+            : Theme.of(context).colorScheme.error,
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
+
+  // ── Persistência ──────────────────────────────────────────────────────────
+
+  Future<void> _saveLastPlayedMusicId(int id) async {
+    final p = await SharedPreferences.getInstance();
+    await p.setInt(_kLastPlayedMusicIdKey, id);
+  }
+
+  Future<void> _saveLastSeekPosition(int ms) async {
+    final p = await SharedPreferences.getInstance();
+    await p.setInt(_kLastSeekPositionMsKey, ms);
+  }
+
+  Future<void> saveCurrentPositionForResume(int ms) async {
+    _lastSeekPositionMs = ms;
+    await _saveLastSeekPosition(ms);
+  }
+
+  Future<void> _saveLastScanDate(DateTime d) async {
+    final p = await SharedPreferences.getInstance();
+    await p.setInt(_kLastScanDateKey, d.millisecondsSinceEpoch);
   }
 
   Future<void> _saveRootDirectory(String path) async {
-    final SharedPreferences prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_kRootDirectoryKey, path);
+    final p = await SharedPreferences.getInstance();
+    await p.setString(_kRootDirectoryKey, path);
   }
 
-  void _initializeQueue(List<MusicTrack> tracks) {
-    _regenerateQueue();
-  }
+  // ── Fila ──────────────────────────────────────────────────────────────────
 
   void _regenerateQueue() {
-    final List<int> allTrackIds = _indexedTracks.map((t) => t.id!).toList();
-
-    if (_isShuffleActive) {
-      _playbackQueue = List.of(allTrackIds)..shuffle();
-    } else {
-      _playbackQueue = allTrackIds;
-    }
-
+    final ids = _indexedTracks.map((t) => t.id!).toList();
+    _playbackQueue = _isShuffleActive ? (List.of(ids)..shuffle()) : ids;
     if (_lastPlayedMusicId != null) {
       _currentQueueIndex = _playbackQueue.indexOf(_lastPlayedMusicId!);
       if (_currentQueueIndex == -1) {
@@ -164,32 +404,23 @@ class Configuration with ChangeNotifier, DiagnosticableTreeMixin {
     }
   }
 
+  // ── DB ────────────────────────────────────────────────────────────────────
+
   Future<void> loadIndexedTracks() async {
     try {
       _indexedTracks = await MusicDatabase.instance.readAllTracks();
       _indexedFileCount = _indexedTracks.length;
       if (_indexedFileCount > 0) {
         _indexingStatus = IndexingStatus.complete;
-        _initializeQueue(_indexedTracks);
+        _regenerateQueue();
+      } else if (_rootDirectory != null) {
+        _indexingStatus = IndexingStatus.idle;
       }
     } catch (e) {
-      debugPrint("Erro ao carregar faixas salvas: $e");
+      debugPrint('Erro ao carregar faixas: $e');
       _indexingStatus = IndexingStatus.error;
     } finally {
       notifyListeners();
-    }
-  }
-
-  Future<void> _saveIndexedTracks() async {
-    try {
-      _indexedTracks = await MusicDatabase.instance.insertTracks(
-        _indexedTracks,
-      );
-      debugPrint(
-        "Foram salvas ${_indexedTracks.length} faixas no banco de dados.",
-      );
-    } catch (e) {
-      debugPrint("Erro ao salvar faixas no banco de dados: $e");
     }
   }
 
@@ -197,89 +428,50 @@ class Configuration with ChangeNotifier, DiagnosticableTreeMixin {
     if (_rootDirectory == null || _indexingStatus == IndexingStatus.scanning) {
       return;
     }
-
     _indexingStatus = IndexingStatus.scanning;
     _indexedTracks = [];
     _indexedFileCount = 0;
     notifyListeners();
-
     try {
-      final rootDir = Directory(_rootDirectory!);
-
-      if (!await rootDir.exists()) {
-        _indexingStatus = IndexingStatus.error;
+      final paths = await compute(_scanDirectoryForPaths, _rootDirectory!);
+      const batchSize = 50;
+      final allTracks = <MusicTrack>[];
+      for (int i = 0; i < paths.length; i += batchSize) {
+        final batch = paths.sublist(i, (i + batchSize).clamp(0, paths.length));
+        final batchTracks = await compute(_buildTracksFromPaths, batch);
+        allTracks.addAll(batchTracks);
+        _indexedFileCount = allTracks.length;
         notifyListeners();
-        debugPrint(
-          "Erro: Diretório raiz não existe ou acesso negado. Caminho: ${_rootDirectory!}",
-        );
-        return;
       }
-
-      debugPrint("Iniciando varredura em: ${_rootDirectory!}");
-
-      await _scanDirectory(rootDir);
-
+      _indexedTracks = await MusicDatabase.instance.insertTracks(allTracks);
+      _indexedFileCount = _indexedTracks.length;
       _indexingStatus = IndexingStatus.complete;
       _lastScanDate = DateTime.now();
-
-      await _saveIndexedTracks();
       await _saveLastScanDate(_lastScanDate!);
+      _regenerateQueue();
     } catch (e) {
       _indexingStatus = IndexingStatus.error;
-      debugPrint("Erro ao varrer o diretório: $e");
+      debugPrint('Erro ao varrer: $e');
     } finally {
       notifyListeners();
     }
   }
 
-  Future<void> _scanDirectory(Directory dir) async {
-    final Stream<FileSystemEntity> fileSystemEntities = dir.list(
-      recursive: true,
-      followLinks: false,
-    );
-
-    await for (final entity in fileSystemEntities) {
-      if (entity is File) {
-        if (MusicTrack.isSupported(entity.path)) {
-          // --- SIMULAÇÃO DA EXTRAÇÃO DE METADADOS ---
-          String fileName = entity.path.split(Platform.pathSeparator).last;
-
-          final MusicTrack track = MusicTrack(
-            path: entity.path,
-            title: fileName.split(".")[0],
-            artist: 'Artista Desconhecido',
-            album: 'Álbum Desconhecido',
-          );
-
-          _indexedTracks.add(track);
-          _indexedFileCount = _indexedTracks.length;
-
-          if (_indexedFileCount % 10 == 0) {
-            notifyListeners();
-          }
-        }
-      }
-    }
-  }
+  // ── Reprodução ────────────────────────────────────────────────────────────
 
   void playTrack(int musicId) {
-    final int newIndex = _indexedTracks.indexWhere(
-      (track) => track.id == musicId,
-    );
-
-    if (newIndex == -1) return;
-
+    final idx = _indexedTracks.indexWhere((t) => t.id == musicId);
+    if (idx == -1) return;
     if (_lastPlayedMusicId != musicId) {
       _regenerateQueue();
       _currentQueueIndex = _playbackQueue.indexOf(musicId);
-
       _lastPlayedMusicId = musicId;
+      _saveLastPlayedMusicId(musicId);
       _lastSeekPositionMs = 0;
       _currentPositionMs = 0;
       _trackDurationMs = 0;
       _audioHandler?.customAction('loadTrack', {'path': currentTrackPath});
     }
-
     _isPlaying = true;
     notifyListeners();
     _audioHandler?.play();
@@ -288,62 +480,61 @@ class Configuration with ChangeNotifier, DiagnosticableTreeMixin {
   void togglePlayPause() {
     if (_lastPlayedMusicId == null && _indexedTracks.isNotEmpty) {
       if (_playbackQueue.isNotEmpty) {
-        playTrack(_playbackQueue.first);
-        return;
+        final id = _playbackQueue.first;
+        _lastPlayedMusicId = id;
+        _currentQueueIndex = 0;
+        _saveLastPlayedMusicId(id);
+        _isPlaying = true;
+        notifyListeners();
+        _audioHandler?.customAction('loadTrack', {'path': currentTrackPath});
+        _audioHandler?.play();
       }
       return;
     }
-
     if (_lastPlayedMusicId != null) {
       _isPlaying = !_isPlaying;
       notifyListeners();
-    }
-
-    if (_isPlaying) {
-      _audioHandler?.play();
-    } else {
-      _audioHandler?.pause();
+      if (_isPlaying) {
+        _audioHandler?.play();
+      } else {
+        _saveLastSeekPosition(_currentPositionMs);
+        _audioHandler?.pause();
+      }
     }
   }
 
   void playNextTrack({bool manualSkip = true}) {
     if (_playbackQueue.isEmpty) return;
-
-    int nextIndex = _currentQueueIndex + 1;
-
-    if (nextIndex >= _playbackQueue.length) {
+    int next = _currentQueueIndex + 1;
+    if (next >= _playbackQueue.length) {
       if (_repeatMode == 'All') {
-        nextIndex = 0;
+        next = 0;
       } else {
-        _isPlaying = false;
-        _currentQueueIndex = -1;
-        _lastPlayedMusicId = _playbackQueue.last;
-        notifyListeners();
+        _audioHandler?.pause();
         return;
       }
     }
-
-    final int nextMusicId = _playbackQueue[nextIndex];
-    _currentQueueIndex = nextIndex;
-    playTrack(nextMusicId);
+    _currentQueueIndex = next;
+    playTrack(_playbackQueue[next]);
   }
 
   void playPreviousTrack() {
     if (_playbackQueue.isEmpty) return;
-
-    int prevIndex = _currentQueueIndex - 1;
-
-    if (prevIndex < 0) {
+    if (_currentPositionMs > 3000) {
+      seekTo(0);
+      return;
+    }
+    int prev = _currentQueueIndex - 1;
+    if (prev < 0) {
       if (_repeatMode == 'All') {
-        prevIndex = _playbackQueue.length - 1;
+        prev = _playbackQueue.length - 1;
       } else {
-        prevIndex = 0;
+        seekTo(0);
+        return;
       }
     }
-
-    final int prevMusicId = _playbackQueue[prevIndex];
-    _currentQueueIndex = prevIndex;
-    playTrack(prevMusicId);
+    _currentQueueIndex = prev;
+    playTrack(_playbackQueue[prev]);
   }
 
   void toggleShuffle() {
@@ -353,26 +544,20 @@ class Configuration with ChangeNotifier, DiagnosticableTreeMixin {
   }
 
   void toggleRepeatMode() {
-    if (_repeatMode == 'Off') {
-      _repeatMode = 'All';
-    } else if (_repeatMode == 'All') {
-      _repeatMode = 'One';
-    } else {
-      _repeatMode = 'Off';
-    }
+    _repeatMode = switch (_repeatMode) {
+      'Off' => 'All',
+      'All' => 'One',
+      _ => 'Off',
+    };
     notifyListeners();
   }
 
   void trackDidFinish() {
-    if (_lastPlayedMusicId == null || _playbackQueue.isEmpty) {
-      return;
-    }
-
+    if (_lastPlayedMusicId == null || _playbackQueue.isEmpty) return;
     if (_repeatMode == 'One') {
       playTrack(_lastPlayedMusicId!);
       return;
     }
-
     playNextTrack(manualSkip: false);
   }
 
@@ -381,9 +566,6 @@ class Configuration with ChangeNotifier, DiagnosticableTreeMixin {
     super.debugFillProperties(properties);
     properties.add(StringProperty('rootDirectory', _rootDirectory));
     properties.add(EnumProperty('indexingStatus', _indexingStatus));
-    properties.add(
-      DiagnosticsProperty<DateTime>('lastScanDate', _lastScanDate),
-    );
     properties.add(IntProperty('indexedFileCount', _indexedFileCount));
   }
 }

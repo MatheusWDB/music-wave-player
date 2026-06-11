@@ -3,10 +3,13 @@ import 'package:music_wave_player/data/music_database.dart';
 class MusicTrack {
   final int? id;
   final String path;
-
   final String title;
   final String artist;
   final String album;
+
+  /// true = metadados foram editados manualmente pelo usuário.
+  /// O indexador respeita esse flag e não sobrescreve os dados.
+  final bool isEdited;
 
   static const List<String> supportedExtensions = [
     '.mp3',
@@ -22,16 +25,30 @@ class MusicTrack {
     required this.title,
     required this.artist,
     required this.album,
+    this.isEdited = false,
   });
 
+  MusicTrack copyWith({
+    int? id,
+    String? path,
+    String? title,
+    String? artist,
+    String? album,
+    bool? isEdited,
+  }) {
+    return MusicTrack(
+      id: id ?? this.id,
+      path: path ?? this.path,
+      title: title ?? this.title,
+      artist: artist ?? this.artist,
+      album: album ?? this.album,
+      isEdited: isEdited ?? this.isEdited,
+    );
+  }
+
   static bool isSupported(String path) {
-    String lowerCasePath = path.toLowerCase();
-    for (var ext in supportedExtensions) {
-      if (lowerCasePath.endsWith(ext)) {
-        return true;
-      }
-    }
-    return false;
+    final lower = path.toLowerCase();
+    return supportedExtensions.any((ext) => lower.endsWith(ext));
   }
 
   Map<String, Object?> toMap() => {
@@ -39,6 +56,7 @@ class MusicTrack {
     MusicDatabase.columnTitle: title,
     MusicDatabase.columnArtist: artist,
     MusicDatabase.columnAlbum: album,
+    MusicDatabase.columnIsEdited: isEdited ? 1 : 0,
   };
 
   static MusicTrack fromMap(Map<String, Object?> map) => MusicTrack(
@@ -47,10 +65,11 @@ class MusicTrack {
     title: map[MusicDatabase.columnTitle] as String,
     artist: map[MusicDatabase.columnArtist] as String,
     album: map[MusicDatabase.columnAlbum] as String,
+    isEdited: (map[MusicDatabase.columnIsEdited] as int? ?? 0) == 1,
   );
 
   @override
-  String toString() {
-    return "MusicTrack: {id: $id, path: $path, title: $title, artist: $artist, album: $album}";
-  }
+  String toString() =>
+      'MusicTrack: {id: $id, path: $path, title: $title, '
+      'artist: $artist, album: $album, isEdited: $isEdited}';
 }

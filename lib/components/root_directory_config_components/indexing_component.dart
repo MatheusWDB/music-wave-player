@@ -17,21 +17,29 @@ class IndexingComponent extends StatelessWidget {
 
     String formattedDate = '';
     if (config.lastScanDate != null) {
-      formattedDate = DateFormat('dd/MM/yyyy').format(config.lastScanDate!);
+      formattedDate = DateFormat(
+        'dd/MM/yyyy HH:mm',
+      ).format(config.lastScanDate!);
     }
 
     String statusText = "Pronto para começar.";
     double? progressValue = 0.0;
 
     if (isScanning) {
-      statusText = "Varrendo e Indexando... (${config.indexedFileCount} arquivos encontrados)";
-      progressValue = null;
+      statusText =
+          "Varrendo e indexando... (${config.indexedFileCount} arquivos encontrados)";
+      progressValue = null; // indeterminate
     } else if (isComplete) {
-      statusText = "Varredura concluída! ${config.indexedFileCount} arquivos indexados.";
+      statusText =
+          "Varredura concluída! ${config.indexedFileCount} arquivo${config.indexedFileCount == 1 ? '' : 's'} indexado${config.indexedFileCount == 1 ? '' : 's'}.";
       progressValue = 1.0;
     } else if (isDirectorySet) {
       statusText = "Clique em Iniciar Varredura.";
     }
+
+    // CORRIGIDO: botão habilitado sempre que não está varrendo e há diretório definido
+    // (inclusive após uma varredura completa, para permitir reindexar)
+    final bool canScan = isDirectorySet && !isScanning;
 
     return Column(
       spacing: 8.0,
@@ -39,33 +47,54 @@ class IndexingComponent extends StatelessWidget {
         LinearProgressIndicator(
           borderRadius: BorderRadius.circular(8.0),
           color: colorScheme.secondary,
-          backgroundColor: colorScheme.primary,
+          backgroundColor: colorScheme.primary..withValues(alpha: 0.3),
           minHeight: 10.0,
           value: progressValue,
         ),
-        Text(statusText),
-        ElevatedButton(
+        Text(
+          statusText,
+          textAlign: TextAlign.center,
+          style: TextStyle(color: colorScheme.onSurface),
+        ),
+        ElevatedButton.icon(
           style: ElevatedButton.styleFrom(
             backgroundColor: colorScheme.secondary,
             foregroundColor: colorScheme.onSecondary,
-            disabledBackgroundColor: Colors.grey[600],
-            disabledForegroundColor: colorScheme.onError,
-            minimumSize: Size.fromHeight(45.0),
+            disabledBackgroundColor: Colors.grey[700],
+            disabledForegroundColor: Colors.grey[400],
+            minimumSize: const Size.fromHeight(45.0),
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(8.0),
             ),
           ),
-          onPressed: !isDirectorySet || isScanning
-              ? null
-              : () => context.read<Configuration>().startIndexing(),
-          child: Text(
-            "Iniciar Varredura",
-            style: TextStyle(fontSize: 16.0, fontWeight: FontWeight.bold),
+          // CORRIGIDO: usa `canScan` em vez de checar `complete`
+          onPressed: canScan
+              ? () => context.read<Configuration>().startIndexing()
+              : null,
+          icon: isScanning
+              ? const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: Colors.white,
+                  ),
+                )
+              : const Icon(Icons.search),
+          label: Text(
+            isScanning
+                ? "Varrendo..."
+                : isComplete
+                ? "Reindexar Biblioteca"
+                : "Iniciar Varredura",
+            style: const TextStyle(fontSize: 16.0, fontWeight: FontWeight.bold),
           ),
         ),
-        Text(
-          config.lastScanDate != null ? 'Última varredura: $formattedDate' : '',
-        ),
+        if (config.lastScanDate != null)
+          Text(
+            'Última varredura: $formattedDate',
+            style: TextStyle(color: Colors.grey[400], fontSize: 12.0),
+          ),
       ],
     );
   }

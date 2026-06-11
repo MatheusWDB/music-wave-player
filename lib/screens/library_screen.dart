@@ -8,34 +8,51 @@ class LibraryScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+
     return Scaffold(
       body: SafeArea(
         child: Column(
           children: [
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 18.0),
+              padding: const EdgeInsets.symmetric(
+                horizontal: 18.0,
+                vertical: 8.0,
+              ),
               child: Row(
                 children: [
-                  Text('LocalPlay Biblioteca'),
-                  Row(
-                    children: [
-                      IconButton(onPressed: () {}, icon: Icon(Icons.search)),
-                      IconButton(
-                        onPressed: () => Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (context) => RootDirectoryConfigScreen(),
-                          ),
-                        ),
-                        icon: Icon(Icons.settings),
+                  // CORRIGIDO: título ocupa o espaço disponível
+                  Expanded(
+                    child: Text(
+                      'LocalPlay',
+                      style: TextStyle(
+                        fontSize: 22.0,
+                        fontWeight: FontWeight.bold,
+                        color: colorScheme.onSurface,
                       ),
-                    ],
+                    ),
+                  ),
+                  IconButton(
+                    onPressed: () {},
+                    icon: Icon(Icons.search, color: colorScheme.onSurface),
+                  ),
+                  IconButton(
+                    onPressed: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => const RootDirectoryConfigScreen(),
+                      ),
+                    ),
+                    icon: Icon(Icons.settings, color: colorScheme.onSurface),
                   ),
                 ],
               ),
             ),
-            Expanded(child: TabsComponent()),
-            MiniPlayerComponent(),
+            const Expanded(child: TabsComponent()),
+            const Padding(
+              padding: EdgeInsets.fromLTRB(8.0, 4.0, 8.0, 8.0),
+              child: MiniPlayerComponent(),
+            ),
           ],
         ),
       ),

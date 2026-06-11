@@ -12,20 +12,13 @@ class MiniPlayerComponent extends StatelessWidget {
     final ColorScheme colorScheme = Theme.of(context).colorScheme;
     final config = context.watch<Configuration>();
 
+    if (config.indexingStatus == IndexingStatus.scanning) {
+      return const SizedBox.shrink();
+    }
+
     MusicTrack? currentTrack;
 
-    currentTrack =
-        config.lastPlayedMusicId != null && config.indexedTracks.isNotEmpty
-        ? config.indexedTracks.firstWhere(
-            (track) => track.id == config.lastPlayedMusicId,
-            orElse: () => config.indexedTracks.first,
-          )
-        : null;
-
-    // Código temporário para enxegar o mini player
-    if (currentTrack == null && config.indexedTracks.isNotEmpty) {
-      currentTrack = config.indexedTracks.first;
-    }
+    currentTrack = config.currentTrack;
 
     if (currentTrack == null) {
       return const SizedBox.shrink();

@@ -1,131 +1,173 @@
 import 'dart:async';
 
 import 'package:audio_service/audio_service.dart';
-import 'package:just_audio/just_audio.dart';
 import 'package:flutter/foundation.dart';
+import 'package:just_audio/just_audio.dart';
 import 'package:music_wave_player/models/configuration.dart';
-import 'package:rxdart/rxdart.dart'; // Usado para combinar streams
+import 'package:rxdart/rxdart.dart';
 
-// Esta classe substitui a simulação e lida com o player real e o background.
-class MusicAudioHandler extends BaseAudioHandler {
+class MusicAudioHandler extends BaseAudioHandler with SeekHandler {
   final AudioPlayer _player = AudioPlayer();
   final Configuration _config;
+  Timer? _periodicSaveTimer;
 
-  // Variável para evitar inicializar o player mais de uma vez ao carregar a faixa
-  bool _isPlayerInitialized = false;
-
-  // Construtor
   MusicAudioHandler(this._config) {
+    _emitIdleState();
     _initPlayerListeners();
   }
 
-  // --- 1. CONEXÃO SERVICE -> CONFIGURATION (Player Real notificando a UI) ---
+  void _emitIdleState() {
+    playbackState.add(
+      PlaybackState(
+        controls: [
+          MediaControl.skipToPrevious,
+          MediaControl.play,
+          MediaControl.skipToNext,
+        ],
+        systemActions: const {
+          MediaAction.seek,
+          MediaAction.skipToPrevious,
+          MediaAction.skipToNext,
+        },
+        androidCompactActionIndices: const [0, 1, 2],
+        processingState: AudioProcessingState.idle,
+        playing: false,
+      ),
+    );
+  }
+
   void _initPlayerListeners() {
-    // Lógica para notificar a UI sobre posição e duração
-    // Combina o stream de posição do player e o stream de duração
-    Rx.combineLatest2<Duration, Duration?, MediaState>(
+    // Posição e duração → Configuration (para a UI Flutter)
+    Rx.combineLatest2<Duration, Duration?, _MediaState>(
       _player.positionStream,
       _player.durationStream,
-      (position, duration) => MediaState(position, duration ?? Duration.zero),
-    ).listen((mediaState) {
-      _config.updateCurrentPosition(mediaState.position.inMilliseconds);
-      _config.updateTrackDuration(mediaState.duration.inMilliseconds);
+      (pos, dur) => _MediaState(pos, dur ?? Duration.zero),
+    ).throttleTime(const Duration(milliseconds: 250)).listen((s) {
+      _config.updateCurrentPosition(s.position.inMilliseconds);
+      _config.updateTrackDuration(s.duration.inMilliseconds);
     });
 
-    // Lógica para FIM DA FAIXA e Mudança de Estado
+    // Save periódico
+    _player.playingStream.listen((playing) {
+      playing ? _startPeriodicSave() : _stopPeriodicSave();
+    });
+
+    // Estado do player → notificação + sincroniza isPlaying no Configuration
     _player.playerStateStream.listen((state) {
-      // 💡 Processamento do FIM DA FAIXA
       if (state.processingState == ProcessingState.completed) {
-        if (kDebugMode) {
-          print("Player Real: FIM DA FAIXA. Chamando trackDidFinish().");
-        }
         _config.trackDidFinish();
       }
 
-      // 💡 Atualizar o MediaItem para notificação (Opcional, mas crucial para Audio Service)
-      // O MediaItem deve ser atualizado quando o estado do player muda.
-      playbackState.add(
-        playbackState.value.copyWith(
-          controls: [
-            // ... (definir controles ativos/inativos)
-          ],
-          systemActions: const {
-            MediaAction.skipToPrevious,
-            MediaAction.skipToNext,
-            MediaAction.seek,
-          },
-          androidCompactActionIndices: const [
-            0,
-            1,
-            2,
-          ], // 3 botões na notificação
-          processingState: _getAudioServiceProcessingState(state),
-          playing: state.playing,
-        ),
+      // CORREÇÃO: sincroniza _isPlaying no Configuration com o estado real
+      // do player. Evita dessincronias quando o player para sozinho (fim da fila).
+      final isActuallyPlaying =
+          state.playing && state.processingState != ProcessingState.completed;
+      _config.syncPlayingState(isActuallyPlaying);
+
+      _pushPlaybackState(state);
+    });
+  }
+
+  void _pushPlaybackState(PlayerState state) {
+    final playing =
+        state.playing && state.processingState != ProcessingState.completed;
+
+    playbackState.add(
+      PlaybackState(
+        controls: [
+          MediaControl.skipToPrevious,
+          if (playing) MediaControl.pause else MediaControl.play,
+          MediaControl.skipToNext,
+        ],
+        systemActions: const {
+          MediaAction.seek,
+          MediaAction.seekForward,
+          MediaAction.seekBackward,
+          MediaAction.skipToPrevious,
+          MediaAction.skipToNext,
+        },
+        androidCompactActionIndices: const [0, 1, 2],
+        processingState: _toServiceState(state.processingState),
+        playing: playing,
+        updatePosition: _player.position,
+        bufferedPosition: _player.bufferedPosition,
+        speed: _player.speed,
+      ),
+    );
+  }
+
+  AudioProcessingState _toServiceState(ProcessingState s) => switch (s) {
+    ProcessingState.idle => AudioProcessingState.idle,
+    ProcessingState.loading => AudioProcessingState.loading,
+    ProcessingState.buffering => AudioProcessingState.buffering,
+    ProcessingState.ready => AudioProcessingState.ready,
+    ProcessingState.completed => AudioProcessingState.completed,
+  };
+
+  void _startPeriodicSave() {
+    _periodicSaveTimer ??= Timer.periodic(const Duration(seconds: 5), (
+      _,
+    ) async {
+      await _config.saveCurrentPositionForResume(
+        _player.position.inMilliseconds,
       );
     });
   }
 
-  // Mapeia o estado do Just Audio para o estado do Audio Service
-  AudioProcessingState _getAudioServiceProcessingState(PlayerState state) {
-    switch (state.processingState) {
-      case ProcessingState.idle:
-        return AudioProcessingState.idle;
-      case ProcessingState.loading:
-        return AudioProcessingState.loading;
-      case ProcessingState.buffering:
-        return AudioProcessingState.buffering;
-      case ProcessingState.ready:
-        return AudioProcessingState.ready;
-      case ProcessingState.completed:
-        return AudioProcessingState.completed;
-    }
+  void _stopPeriodicSave() {
+    _periodicSaveTimer?.cancel();
+    _periodicSaveTimer = null;
   }
 
-  // --- 2. CONEXÃO CONFIGURATION -> SERVICE (Ações da UI) ---
-  // Não precisamos de um listener no Service para o Config, pois o Config
-  // agora chama diretamente os métodos públicos do AudioHandler (play(), pause(), customAction()).
-
-  // --- 3. MÉTODOS DE CONTROLE E REPRODUÇÃO (AudioHandler Overrides) ---
-
-  // Comando Customizado para carregar a faixa (chamado por config.playTrack)
   @override
   Future<dynamic> customAction(
     String name, [
-    Map<String, dynamic>? arguments,
+    Map<String, dynamic>? extras,
   ]) async {
     if (name == 'loadTrack') {
-      final String path = arguments!['path'];
-      if (kDebugMode) {
-        print(
-          "AudioHandler: Recebido comando customizado 'loadTrack' para $path",
-        );
-      }
+      final path = extras!['path'] as String;
+      if (kDebugMode) print("AudioHandler: loadTrack → $path");
 
-      // 💡 Carregar a faixa usando o path
-      await _player.setFilePath(path);
+      final track = _config.currentTrack;
 
-      // 💡 Atualiza MediaItem para mostrar a música na notificação/controles
+      // Emite mediaItem sem duração — título/artista aparecem imediatamente
       mediaItem.add(
         MediaItem(
-          id: path, // Use o path como ID único
-          album: _config.currentTrack?.album,
-          title: _config.currentTrack?.title ?? 'Título Desconhecido',
-          artist: _config.currentTrack?.artist ?? 'Artista Desconhecido',
-          artUri: Uri.parse('http://example.com/album_art.png'), // Placeholder
+          id: path,
+          title: track?.title ?? 'Título Desconhecido',
+          artist: track?.artist ?? 'Artista Desconhecido',
+          album: track?.album ?? 'Álbum Desconhecido',
         ),
       );
 
-      // Tenta buscar a posição salva (lastSeekPositionMs)
+      // Carrega o arquivo — após isso a duração fica disponível
+      await _player.setFilePath(path);
+
+      // CORREÇÃO: aguarda a duração real do arquivo e atualiza o mediaItem.
+      // Usar await garante que o duration não seja nulo quando emitido.
+      final duration = _player.duration;
+      if (duration != null && duration.inMilliseconds > 0) {
+        mediaItem.add(mediaItem.value!.copyWith(duration: duration));
+      } else {
+        // Se ainda não disponível, espera até 2s pelo primeiro valor não nulo
+        _player.durationStream
+            .where((d) => d != null && d.inMilliseconds > 0)
+            .take(1)
+            .timeout(const Duration(seconds: 2), onTimeout: (_) {})
+            .listen((d) {
+              if (d != null && mediaItem.value != null) {
+                mediaItem.add(mediaItem.value!.copyWith(duration: d));
+              }
+            });
+      }
+
       if (_config.lastSeekPositionMs > 0) {
         await _player.seek(Duration(milliseconds: _config.lastSeekPositionMs));
-        _config.lastSeekPositionMs = 0; // Limpa após o seek
+        _config.lastSeekPositionMs = 0;
       }
     }
-    return null;
   }
 
-  // 💡 Play/Pause/Seek delegados ao Just Audio
   @override
   Future<void> play() => _player.play();
 
@@ -135,34 +177,23 @@ class MusicAudioHandler extends BaseAudioHandler {
   @override
   Future<void> seek(Duration position) => _player.seek(position);
 
-  // Skip delegados de volta ao Configuration para manter a lógica de Queue/Repeat
   @override
-  Future<void> skipToNext() async {
-    // 💡 CORREÇÃO 3: Adicionar await, pois o método retorna Future<void>
-    _config.playNextTrack();
-  }
+  Future<void> skipToNext() async => _config.playNextTrack();
 
   @override
-  Future<void> skipToPrevious() async {
-    // 💡 CORREÇÃO 4: Adicionar await, pois o método retorna Future<void>
-    _config.playPreviousTrack();
-  }
+  Future<void> skipToPrevious() async => _config.playPreviousTrack();
 
-  // Limpeza
   @override
   Future<void> stop() async {
+    _stopPeriodicSave();
+    await _config.saveCurrentPositionForResume(_player.position.inMilliseconds);
     await _player.stop();
-    // 💡 IMPORTANTE: Cancelar subscriptions e remover listeners
-    // Isso é crucial para evitar vazamentos de memória.
-    // ... (As subscriptions deveriam ser salvas em propriedades para serem canceladas aqui)
-    return super.stop();
+    await super.stop();
   }
 }
 
-// Classe auxiliar para combinar posição e duração
-class MediaState {
+class _MediaState {
   final Duration position;
   final Duration duration;
-
-  MediaState(this.position, this.duration);
+  _MediaState(this.position, this.duration);
 }

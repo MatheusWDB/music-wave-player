@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:music_wave_player/models/configuration.dart';
 import 'package:music_wave_player/screens/library_screen.dart';
 import 'package:music_wave_player/services/music_audio_handler.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:provider/provider.dart';
 
 const Color colorBgDark = Color(0xFF0D1B2A);
@@ -11,44 +12,42 @@ const Color colorHighlight = Color(0xFF457B9D);
 const Color colorAccent = Color(0xFFA8DADC);
 const Color colorAction = Color(0xFFE63946);
 
-void main() async {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // 1. Carrega o Configuration (Modelo de Estado)
-  final config = await Configuration.loadFromStorage();
+  // Cria Configuration vazio — zero I/O, instantâneo
+  final config = Configuration.empty();
 
-  // 2. Inicia o Audio Service (Player Real)
-  final audioHandler = await _initAudioService(config);
+  // Inicializa AudioService (necessário antes do runApp)
+  final audioHandler = await AudioService.init(
+    builder: () => MusicAudioHandler(config),
+    config: const AudioServiceConfig(
+      androidNotificationChannelId: 'br.com.hematsu.music_wave_player.channel',
+      androidNotificationChannelName: 'MusicWave Player',
+      androidNotificationIcon: 'mipmap/ic_launcher',
+      androidStopForegroundOnPause: false,
+    ),
+  );
 
-  // 3. Injeta o handler no Configuration
   config.audioHandler = audioHandler;
 
-  // 💡 CORREÇÃO: Passa o Configuration já carregado
   runApp(
-    MultiProvider(
-      providers: [ChangeNotifierProvider<Configuration>.value(value: config)],
+    ChangeNotifierProvider<Configuration>.value(
+      value: config,
       child: const MyApp(),
     ),
   );
-}
 
-Future<AudioHandler> _initAudioService(Configuration config) async {
-  return await AudioService.init(
-    builder: () => MusicAudioHandler(config),
-    // 💡 CORREÇÃO 2a: Usar parâmetros individuais da AudioServiceConfig
-    config: const AudioServiceConfig(
-      // Parâmetros obrigatórios e recomendados para notificação Android:
-      androidNotificationChannelId: 'music_wave_player_channel',
-      androidNotificationChannelName: 'Music Playback',
-      androidNotificationIcon: 'mipmap/ic_launcher', // Caminho para o ícone
-      // Configurações de UI:
-      artDownscaleHeight: 128,
-      artDownscaleWidth: 128,
+  // CORREÇÃO ANR: carrega SQLite só depois que o primeiro frame foi renderizado.
+  // Isso garante que a UI está visível antes de qualquer I/O pesado,
+  // e que o processo do audio_service em background não trava no boot.
+  WidgetsBinding.instance.addPostFrameCallback((_) async {
+    // Solicita permissão de notificação (Android 13+)
+    await Permission.notification.request();
 
-      // Se quiser que o app continue em primeiro plano mesmo em pausa, mude este para false
-      androidStopForegroundOnPause: true,
-    ),
-  );
+    // Agora carrega dados do storage de forma segura
+    await config.loadFromStorageAsync();
+  });
 }
 
 class MyApp extends StatelessWidget {
@@ -61,8 +60,7 @@ class MyApp extends StatelessWidget {
       title: 'MusicWave Player',
       theme: ThemeData(
         brightness: Brightness.dark,
-
-        colorScheme: ColorScheme(
+        colorScheme: const ColorScheme(
           brightness: Brightness.dark,
           primary: colorHighlight,
           onPrimary: colorSurface,
@@ -73,15 +71,13 @@ class MyApp extends StatelessWidget {
           error: colorAction,
           onError: Colors.white,
         ),
-
         scaffoldBackgroundColor: colorBgDark,
-
-        appBarTheme: AppBarTheme(
+        appBarTheme: const AppBarTheme(
           backgroundColor: colorSurface,
           foregroundColor: colorAccent,
         ),
       ),
-      home: LibraryScreen(),
+      home: const LibraryScreen(),
     );
   }
 }
