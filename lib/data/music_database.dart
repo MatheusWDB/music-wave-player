@@ -15,6 +15,7 @@ class MusicDatabase {
   static const String columnArtist = 'artist';
   static const String columnAlbum = 'album';
   static const String columnIsEdited = 'is_edited';
+  static const String columnCoverPath = 'cover_path';
 
   Future<Database> get database async {
     if (_database != null) return _database!;
@@ -27,7 +28,7 @@ class MusicDatabase {
     final path = join(dbPath, filePath);
     return await openDatabase(
       path,
-      version: 2,
+      version: 3,
       onCreate: _createDB,
       onUpgrade: _upgradeDB,
     );
@@ -41,16 +42,21 @@ class MusicDatabase {
         $columnTitle     TEXT NOT NULL,
         $columnArtist    TEXT NOT NULL,
         $columnAlbum     TEXT NOT NULL,
-        $columnIsEdited  INTEGER NOT NULL DEFAULT 0
+        $columnIsEdited  INTEGER NOT NULL DEFAULT 0,
+        $columnCoverPath TEXT
       )
     ''');
   }
 
-  /// Migração da v1 para v2: adiciona a coluna is_edited.
   Future _upgradeDB(Database db, int oldVersion, int newVersion) async {
     if (oldVersion < 2) {
       await db.execute(
         'ALTER TABLE $tableTracks ADD COLUMN $columnIsEdited INTEGER NOT NULL DEFAULT 0',
+      );
+    }
+    if (oldVersion < 3) {
+      await db.execute(
+        'ALTER TABLE $tableTracks ADD COLUMN $columnCoverPath TEXT',
       );
     }
   }
@@ -60,12 +66,11 @@ class MusicDatabase {
     final List<MusicTrack> savedTracks = [];
 
     await db.transaction((txn) async {
-      // Remove apenas as faixas que NÃO foram editadas manualmente
-      // para não perder os metadados personalizados durante reindexação.
+      // Remove apenas faixas não editadas — preserva metadados personalizados
       await txn.delete(tableTracks, where: '$columnIsEdited = 0');
 
       for (final track in tracks) {
-        // Se a faixa já existe e foi editada, pula — preserva os dados do usuário.
+        // Se a faixa já existe (editada), preserva e retorna
         final existing = await txn.query(
           tableTracks,
           where: '$columnPath = ?',
@@ -73,7 +78,6 @@ class MusicDatabase {
           limit: 1,
         );
         if (existing.isNotEmpty) {
-          // Já existe (é uma editada) — apenas recupera para retornar na lista.
           savedTracks.add(MusicTrack.fromMap(existing.first));
           continue;
         }
@@ -94,28 +98,34 @@ class MusicDatabase {
     final db = await instance.database;
     final result = await db.query(tableTracks);
     final tracks = result.map((m) => MusicTrack.fromMap(m)).toList();
-    tracks.sort(
-      (a, b) => naturalCompare(a.title.toLowerCase(), b.title.toLowerCase()),
-    );
+    tracks.sort((a, b) => naturalCompare(
+          a.title.toLowerCase(),
+          b.title.toLowerCase(),
+        ));
     return tracks;
   }
 
-  /// Atualiza título, artista e álbum de uma faixa e marca como editada.
+  /// Atualiza metadados editados pelo usuário.
+  /// coverPath é opcional — se null, mantém o valor existente no banco.
   Future<void> updateTrack({
     required int id,
     required String title,
     required String artist,
     required String album,
+    String? coverPath,
   }) async {
     final db = await instance.database;
+    final values = <String, dynamic>{
+      columnTitle: title,
+      columnArtist: artist,
+      columnAlbum: album,
+      columnIsEdited: 1,
+    };
+    if (coverPath != null) values[columnCoverPath] = coverPath;
+
     await db.update(
       tableTracks,
-      {
-        columnTitle: title,
-        columnArtist: artist,
-        columnAlbum: album,
-        columnIsEdited: 1,
-      },
+      values,
       where: '$columnId = ?',
       whereArgs: [id],
     );
@@ -126,7 +136,6 @@ class MusicDatabase {
     return await db.delete(tableTracks);
   }
 
-  /// Natural sort: compara strings tratando sequências de dígitos como inteiros.
   static int naturalCompare(String a, String b) {
     final re = RegExp(r'\d+|\D+');
     final partsA = re.allMatches(a).map((m) => m.group(0)!).toList();
@@ -137,9 +146,8 @@ class MusicDatabase {
       final pb = partsB[i];
       final na = int.tryParse(pa);
       final nb = int.tryParse(pb);
-      final int cmp = (na != null && nb != null)
-          ? na.compareTo(nb)
-          : pa.compareTo(pb);
+      final int cmp =
+          (na != null && nb != null) ? na.compareTo(nb) : pa.compareTo(pb);
       if (cmp != 0) return cmp;
     }
     return partsA.length.compareTo(partsB.length);

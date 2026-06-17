@@ -3,8 +3,11 @@ import 'dart:io';
 import 'package:audio_service/audio_service.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:music_wave_player/data/music_database.dart';
 import 'package:music_wave_player/models/music_track.dart';
+import 'package:music_wave_player/models/playlist.dart';
+import 'package:music_wave_player/services/cover_art_service.dart';
 import 'package:music_wave_player/services/ffmpeg_service.dart';
 import 'package:music_wave_player/services/saf_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -40,15 +43,30 @@ Future<MusicTrack> _extractMetadata(String path) async {
   String title = _cleanFilename(path);
   String artist = 'Artista Desconhecido';
   String album = 'Álbum Desconhecido';
+
+  final lower = path.toLowerCase();
   try {
-    if (path.toLowerCase().endsWith('.mp3')) {
+    if (lower.endsWith('.mp3')) {
       final tags = await _readId3v2(File(path));
+      if (tags['title'] != null) title = tags['title']!;
+      if (tags['artist'] != null) artist = tags['artist']!;
+      if (tags['album'] != null) album = tags['album']!;
+    } else if (lower.endsWith('.m4a') || lower.endsWith('.mp4')) {
+      final tags = await _readMp4Metadata(path);
       if (tags['title'] != null) title = tags['title']!;
       if (tags['artist'] != null) artist = tags['artist']!;
       if (tags['album'] != null) album = tags['album']!;
     }
   } catch (_) {}
-  return MusicTrack(path: path, title: title, artist: artist, album: album);
+
+  final coverPath = await CoverArtService.extractAndSave(path);
+  return MusicTrack(
+    path: path,
+    title: title,
+    artist: artist,
+    album: album,
+    coverPath: coverPath,
+  );
 }
 
 String _cleanFilename(String path) {
@@ -64,9 +82,8 @@ Future<Map<String, String?>> _readId3v2(File file) async {
   final raf = await file.open(mode: FileMode.read);
   try {
     final header = await raf.read(10);
-    if (header[0] != 0x49 || header[1] != 0x44 || header[2] != 0x33) {
+    if (header[0] != 0x49 || header[1] != 0x44 || header[2] != 0x33)
       return result;
-    }
     final tagSize =
         ((header[6] & 0x7F) << 21) |
         ((header[7] & 0x7F) << 14) |
@@ -122,7 +139,90 @@ String _decodeUtf16(List<int> bytes) {
   return buffer.toString();
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+Future<Map<String, String?>> _readMp4Metadata(String path) async {
+  final result = <String, String?>{};
+  final file = File(path);
+  if (!await file.exists()) return result;
+  final bytes = await file.readAsBytes();
+  _parseMp4Boxes(bytes, 0, bytes.length, result);
+  return result;
+}
+
+void _parseMp4Boxes(
+  List<int> bytes,
+  int offset,
+  int limit,
+  Map<String, String?> result,
+) {
+  int pos = offset;
+  while (pos + 8 <= limit) {
+    final size = _readUint32BE(bytes, pos);
+    if (size < 8 || pos + size > limit) break;
+    final name = String.fromCharCodes(
+      bytes.sublist(pos + 4, pos + 8).map((b) => b & 0xFF),
+    );
+    if (name == '\u00A9nam' || name == '©nam') {
+      result['title'] = _readItunesStringBox(bytes, pos + 8, pos + size);
+    } else if (name == '\u00A9ART' || name == '©ART') {
+      result['artist'] = _readItunesStringBox(bytes, pos + 8, pos + size);
+    } else if (name == '\u00A9alb' || name == '©alb') {
+      result['album'] = _readItunesStringBox(bytes, pos + 8, pos + size);
+    }
+    if (_isMp4Container(name)) {
+      int innerOffset = pos + 8;
+      if (name == 'meta') innerOffset += 4;
+      _parseMp4Boxes(bytes, innerOffset, pos + size, result);
+    }
+    pos += size;
+    if (result['title'] != null &&
+        result['artist'] != null &&
+        result['album'] != null)
+      break;
+  }
+}
+
+String? _readItunesStringBox(List<int> bytes, int offset, int limit) {
+  int pos = offset;
+  while (pos + 8 <= limit) {
+    final size = _readUint32BE(bytes, pos);
+    if (size < 8 || pos + size > limit) break;
+    final name = String.fromCharCodes(
+      bytes.sublist(pos + 4, pos + 8).map((b) => b & 0xFF),
+    );
+    if (name == 'data' && size > 16) {
+      final text = String.fromCharCodes(
+        bytes.sublist(pos + 16, pos + size),
+      ).trim();
+      return text.isNotEmpty ? text : null;
+    }
+    pos += size;
+  }
+  return null;
+}
+
+bool _isMp4Container(String name) {
+  const containers = {
+    'moov',
+    'udta',
+    'meta',
+    'ilst',
+    'trak',
+    'mdia',
+    'minf',
+    'stbl',
+    'edts',
+    'dinf',
+    'sinf',
+  };
+  return containers.contains(name);
+}
+
+int _readUint32BE(List<int> bytes, int offset) {
+  return ((bytes[offset] & 0xFF) << 24) |
+      ((bytes[offset + 1] & 0xFF) << 16) |
+      ((bytes[offset + 2] & 0xFF) << 8) |
+      (bytes[offset + 3] & 0xFF);
+}
 
 class Configuration with ChangeNotifier, DiagnosticableTreeMixin {
   String? _rootDirectory;
@@ -141,6 +241,10 @@ class Configuration with ChangeNotifier, DiagnosticableTreeMixin {
   int _trackDurationMs = 0;
   AudioHandler? _audioHandler;
   bool _isLoading = true;
+
+  static const _safChannel = MethodChannel(
+    'br.com.hematsu.music_wave_player/saf',
+  );
 
   Configuration.empty();
 
@@ -168,8 +272,6 @@ class Configuration with ChangeNotifier, DiagnosticableTreeMixin {
     }
   }
 
-  // ── Getters ───────────────────────────────────────────────────────────────
-
   String? get rootDirectory => _rootDirectory;
   DateTime? get lastScanDate => _lastScanDate;
   IndexingStatus get indexingStatus => _indexingStatus;
@@ -195,8 +297,6 @@ class Configuration with ChangeNotifier, DiagnosticableTreeMixin {
     }
   }
 
-  // ── Setters ───────────────────────────────────────────────────────────────
-
   set rootDirectory(String path) {
     if (_rootDirectory == path) return;
     _rootDirectory = path;
@@ -205,10 +305,7 @@ class Configuration with ChangeNotifier, DiagnosticableTreeMixin {
     _saveRootDirectory(path);
   }
 
-  set audioHandler(AudioHandler handler) {
-    _audioHandler = handler;
-  }
-
+  set audioHandler(AudioHandler handler) => _audioHandler = handler;
   set lastSeekPositionMs(int ms) => _lastSeekPositionMs = ms;
 
   void syncPlayingState(bool playing) {
@@ -232,20 +329,43 @@ class Configuration with ChangeNotifier, DiagnosticableTreeMixin {
     }
   }
 
-  void seekTo(int ms) {
-    _audioHandler?.seek(Duration(milliseconds: ms));
+  void seekTo(int ms) => _audioHandler?.seek(Duration(milliseconds: ms));
+
+  Future<void> _triggerMediaScan(String dirPath) async {
+    try {
+      await _safChannel.invokeMethod('scanMedia', {'path': dirPath});
+    } catch (_) {}
+  }
+
+  // ── Playlist ──────────────────────────────────────────────────────────────
+
+  /// Insere as faixas da playlist na fila imediatamente após a música atual,
+  /// descartando o que viria depois. Começa a tocar a primeira faixa da playlist.
+  void playPlaylist(Playlist playlist) {
+    if (playlist.trackIds.isEmpty) return;
+
+    final validIds = playlist.trackIds
+        .where((id) => _indexedTracks.any((t) => t.id == id))
+        .toList();
+    if (validIds.isEmpty) return;
+
+    _playbackQueue = List.of(validIds);
+    _currentQueueIndex = 0;
+
+    final firstId = validIds.first;
+    _lastPlayedMusicId = firstId;
+    _saveLastPlayedMusicId(firstId);
+    _lastSeekPositionMs = 0;
+    _currentPositionMs = 0;
+    _trackDurationMs = 0;
+    _audioHandler?.customAction('loadTrack', {'path': currentTrackPath});
+    _isPlaying = true;
+    notifyListeners();
+    _audioHandler?.play();
   }
 
   // ── Edição de metadados ───────────────────────────────────────────────────
 
-  /// Edita os metadados de uma faixa:
-  ///   1. Escreve no arquivo via ffmpeg (cópia temporária).
-  ///   2. Move a cópia para o arquivo original via SAF.
-  ///   3. Atualiza o banco SQLite.
-  ///   4. Atualiza a lista em memória e notifica a UI.
-  ///
-  /// [context] é necessário para exibir o diálogo de permissão SAF e snackbars.
-  /// Retorna true se tudo correu bem.
   Future<bool> editTrack({
     required MusicTrack track,
     required String newTitle,
@@ -253,80 +373,51 @@ class Configuration with ChangeNotifier, DiagnosticableTreeMixin {
     required String newAlbum,
     required BuildContext context,
   }) async {
-    print("Inicio");
-    // 1. Garante acesso SAF à pasta de músicas
     String? folderUri = await SafService.ensureAccess();
-    print("Atribuiu folderUri");
     if (folderUri == null) {
-      print("folderUri == null");
-      // Usuário cancelou o seletor ou erro
-      if (context.mounted) {
+      if (context.mounted)
         _showSnack(context, 'Acesso à pasta negado. Edição cancelada.');
-        print("Snack acesso negado");
-      }
       return false;
     }
-    print("Fim da etapa 1");
-    // 2. ffmpeg gera arquivo temporário com novos metadados
     final tempPath = await FfmpegService.writeMetadata(
       inputPath: track.path,
       title: newTitle,
       artist: newArtist,
       album: newAlbum,
     );
-    print("Atribuiu tempPath");
     if (tempPath == null) {
-      print("tempPath == null");
-      if (context.mounted) {
+      if (context.mounted)
         _showSnack(context, 'Erro ao processar o arquivo. Tente novamente.');
-        print("Snack acesso negado");
-      }
       return false;
     }
-    print("Fim da etapa 2");
-    // 3. Copia o temporário de volta para a pasta original via SAF
     final fileName = track.path.split('/').last;
     final copied = await SafService.copyTempToSaf(
       tempPath: tempPath,
       targetFileName: fileName,
       folderUri: folderUri,
     );
-    print("Atribuiu fileName e copied");
-    // Limpa o temporário independente do resultado
     try {
       await File(tempPath).delete();
-      print("File(tempPath).delete()");
-    } catch (_) {print("File(tempPath).delete() catch");}
-
+    } catch (_) {}
     if (!copied) {
-      print("!copied");
-      if (context.mounted) {
+      if (context.mounted)
         _showSnack(context, 'Erro ao salvar o arquivo. Tente novamente.');
-        print("Snack acesso negado");
-      }
       return false;
     }
-    print("Fim da etapa 3");
-    // 4. Atualiza o banco
     await MusicDatabase.instance.updateTrack(
       id: track.id!,
       title: newTitle,
       artist: newArtist,
       album: newAlbum,
     );
-    print("Fim da etapa 4");
-    // 5. Atualiza a lista em memória
     final idx = _indexedTracks.indexWhere((t) => t.id == track.id);
-    print("Atribiuiu idx");
     if (idx != -1) {
-      print("idx != -1 ");
       _indexedTracks[idx] = track.copyWith(
         title: newTitle,
         artist: newArtist,
         album: newAlbum,
         isEdited: true,
       );
-      // Reaplica natural sort após edição (título pode ter mudado)
       _indexedTracks.sort(
         (a, b) => MusicDatabase.naturalCompare(
           a.title.toLowerCase(),
@@ -335,15 +426,11 @@ class Configuration with ChangeNotifier, DiagnosticableTreeMixin {
       );
       notifyListeners();
     }
-    print("Fim da etapa 5");
-    // 6. Atualiza o mediaItem do AudioHandler se for a faixa tocando agora
     if (_lastPlayedMusicId == track.id) {
       await _audioHandler?.customAction('loadTrack', {'path': track.path});
     }
-
-    if (context.mounted) {
+    if (context.mounted)
       _showSnack(context, 'Informações salvas com sucesso!', isSuccess: true);
-    }
     return true;
   }
 
@@ -362,8 +449,6 @@ class Configuration with ChangeNotifier, DiagnosticableTreeMixin {
       ),
     );
   }
-
-  // ── Persistência ──────────────────────────────────────────────────────────
 
   Future<void> _saveLastPlayedMusicId(int id) async {
     final p = await SharedPreferences.getInstance();
@@ -390,8 +475,6 @@ class Configuration with ChangeNotifier, DiagnosticableTreeMixin {
     await p.setString(_kRootDirectoryKey, path);
   }
 
-  // ── Fila ──────────────────────────────────────────────────────────────────
-
   void _regenerateQueue() {
     final ids = _indexedTracks.map((t) => t.id!).toList();
     _playbackQueue = _isShuffleActive ? (List.of(ids)..shuffle()) : ids;
@@ -403,8 +486,6 @@ class Configuration with ChangeNotifier, DiagnosticableTreeMixin {
       }
     }
   }
-
-  // ── DB ────────────────────────────────────────────────────────────────────
 
   Future<void> loadIndexedTracks() async {
     try {
@@ -425,9 +506,8 @@ class Configuration with ChangeNotifier, DiagnosticableTreeMixin {
   }
 
   Future<void> startIndexing() async {
-    if (_rootDirectory == null || _indexingStatus == IndexingStatus.scanning) {
+    if (_rootDirectory == null || _indexingStatus == IndexingStatus.scanning)
       return;
-    }
     _indexingStatus = IndexingStatus.scanning;
     _indexedTracks = [];
     _indexedFileCount = 0;
@@ -449,6 +529,7 @@ class Configuration with ChangeNotifier, DiagnosticableTreeMixin {
       _lastScanDate = DateTime.now();
       await _saveLastScanDate(_lastScanDate!);
       _regenerateQueue();
+      await _triggerMediaScan(_rootDirectory!);
     } catch (e) {
       _indexingStatus = IndexingStatus.error;
       debugPrint('Erro ao varrer: $e');
@@ -457,13 +538,11 @@ class Configuration with ChangeNotifier, DiagnosticableTreeMixin {
     }
   }
 
-  // ── Reprodução ────────────────────────────────────────────────────────────
-
-  void playTrack(int musicId) {
+  void playTrack(int musicId, {bool regenerateQueue = true}) {
     final idx = _indexedTracks.indexWhere((t) => t.id == musicId);
     if (idx == -1) return;
     if (_lastPlayedMusicId != musicId) {
-      _regenerateQueue();
+      if (regenerateQueue) _regenerateQueue();
       _currentQueueIndex = _playbackQueue.indexOf(musicId);
       _lastPlayedMusicId = musicId;
       _saveLastPlayedMusicId(musicId);
@@ -515,7 +594,7 @@ class Configuration with ChangeNotifier, DiagnosticableTreeMixin {
       }
     }
     _currentQueueIndex = next;
-    playTrack(_playbackQueue[next]);
+    playTrack(_playbackQueue[next], regenerateQueue: false);
   }
 
   void playPreviousTrack() {
@@ -534,7 +613,7 @@ class Configuration with ChangeNotifier, DiagnosticableTreeMixin {
       }
     }
     _currentQueueIndex = prev;
-    playTrack(_playbackQueue[prev]);
+    playTrack(_playbackQueue[prev], regenerateQueue: false);
   }
 
   void toggleShuffle() {

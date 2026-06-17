@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:music_wave_player/components/cover_art_widget.dart';
 import 'package:music_wave_player/models/configuration.dart';
 import 'package:music_wave_player/models/music_track.dart';
 import 'package:music_wave_player/screens/full_player_screen.dart';
@@ -16,24 +17,17 @@ class MiniPlayerComponent extends StatelessWidget {
       return const SizedBox.shrink();
     }
 
-    MusicTrack? currentTrack;
-
-    currentTrack = config.currentTrack;
-
-    if (currentTrack == null) {
-      return const SizedBox.shrink();
-    }
+    final MusicTrack? currentTrack = config.currentTrack;
+    if (currentTrack == null) return const SizedBox.shrink();
 
     return GestureDetector(
       onTap: () {
-        final int trackId = currentTrack!.id!;
-
+        final int trackId = currentTrack.id!;
         config.playTrack(trackId);
-
         Navigator.push(
           context,
           MaterialPageRoute(
-            builder: (context) => FullPlayerScreen(initialTrackId: trackId),
+            builder: (_) => FullPlayerScreen(initialTrackId: trackId),
           ),
         );
       },
@@ -45,22 +39,15 @@ class MiniPlayerComponent extends StatelessWidget {
           borderRadius: BorderRadius.circular(10.0),
         ),
         child: Row(
-          mainAxisSize: MainAxisSize.max,
           children: [
-            Container(
-              width: 45.0,
-              height: 45.0,
-              decoration: BoxDecoration(
-                color: colorScheme.primaryContainer,
-                borderRadius: BorderRadius.circular(5.0),
-              ),
-              child: Icon(
-                Icons.music_note,
-                color: colorScheme.onPrimaryContainer,
-                size: 28.0,
-              ),
+            // Capa do álbum
+            CoverArtWidget(
+              coverPath: currentTrack.coverPath,
+              size: 45,
+              borderRadius: BorderRadius.circular(5),
             ),
-            const SizedBox(width: 10.0),
+            const SizedBox(width: 10),
+            // Título e artista
             Expanded(
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,

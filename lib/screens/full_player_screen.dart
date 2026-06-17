@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:music_wave_player/components/cover_art_widget.dart';
 import 'package:music_wave_player/components/edit_track_bottom_sheet.dart';
 import 'package:music_wave_player/models/configuration.dart';
 import 'package:music_wave_player/models/music_track.dart';
@@ -47,6 +48,12 @@ class _FullPlayerScreenState extends State<FullPlayerScreen>
       );
     }
 
+    final coverWidget = CoverArtWidget(
+      coverPath: currentTrack.coverPath,
+      size: double.infinity,
+      borderRadius: BorderRadius.circular(20),
+    );
+
     final trackInfo = _TrackInfo(
       title: currentTrack.title,
       artist: currentTrack.artist,
@@ -79,7 +86,6 @@ class _FullPlayerScreenState extends State<FullPlayerScreen>
         title: const Text('LocalPlay'),
         centerTitle: true,
         actions: [
-          // Menu de três pontinhos — abre opções para a faixa atual
           PopupMenuButton<String>(
             icon: const Icon(Icons.more_vert),
             onSelected: (value) {
@@ -98,7 +104,6 @@ class _FullPlayerScreenState extends State<FullPlayerScreen>
                   ],
                 ),
               ),
-              // Aqui futuramente: "Adicionar à playlist", "Compartilhar", etc.
             ],
           ),
         ],
@@ -106,12 +111,14 @@ class _FullPlayerScreenState extends State<FullPlayerScreen>
       body: SafeArea(
         child: isLandscape
             ? _LandscapeLayout(
+                coverWidget: coverWidget,
                 trackInfo: trackInfo,
                 slider: slider,
                 controls: controls,
                 colorScheme: colorScheme,
               )
             : _PortraitLayout(
+                coverWidget: coverWidget,
                 trackInfo: trackInfo,
                 slider: slider,
                 controls: controls,
@@ -125,9 +132,10 @@ class _FullPlayerScreenState extends State<FullPlayerScreen>
 // ── Layouts ───────────────────────────────────────────────────────────────────
 
 class _PortraitLayout extends StatelessWidget {
-  final Widget trackInfo, slider, controls;
+  final Widget coverWidget, trackInfo, slider, controls;
   final ColorScheme colorScheme;
   const _PortraitLayout({
+    required this.coverWidget,
     required this.trackInfo,
     required this.slider,
     required this.controls,
@@ -145,15 +153,7 @@ class _PortraitLayout extends StatelessWidget {
               constraints: const BoxConstraints(maxHeight: 320),
               width: double.infinity,
               margin: const EdgeInsets.only(bottom: 24.0),
-              decoration: BoxDecoration(
-                color: colorScheme.primaryContainer,
-                borderRadius: BorderRadius.circular(20.0),
-              ),
-              child: Icon(
-                Icons.music_note,
-                size: 100,
-                color: colorScheme.onPrimaryContainer,
-              ),
+              child: coverWidget,
             ),
           ),
           trackInfo,
@@ -169,9 +169,10 @@ class _PortraitLayout extends StatelessWidget {
 }
 
 class _LandscapeLayout extends StatelessWidget {
-  final Widget trackInfo, slider, controls;
+  final Widget coverWidget, trackInfo, slider, controls;
   final ColorScheme colorScheme;
   const _LandscapeLayout({
+    required this.coverWidget,
     required this.trackInfo,
     required this.slider,
     required this.controls,
@@ -186,17 +187,7 @@ class _LandscapeLayout extends StatelessWidget {
           flex: 2,
           child: Padding(
             padding: const EdgeInsets.all(16.0),
-            child: Container(
-              decoration: BoxDecoration(
-                color: colorScheme.primaryContainer,
-                borderRadius: BorderRadius.circular(16.0),
-              ),
-              child: Icon(
-                Icons.music_note,
-                size: 80,
-                color: colorScheme.onPrimaryContainer,
-              ),
-            ),
+            child: coverWidget,
           ),
         ),
         Expanded(

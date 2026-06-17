@@ -1,20 +1,15 @@
 import 'package:flutter/material.dart';
+import 'package:music_wave_player/data/playlist_database.dart';
 import 'package:music_wave_player/models/configuration.dart';
 import 'package:music_wave_player/models/music_track.dart';
+import 'package:music_wave_player/models/playlist.dart';
 import 'package:provider/provider.dart';
 
-/// BottomSheet reutilizável para editar título, artista e álbum de uma faixa.
-///
-/// Uso:
-/// ```dart
-/// EditTrackBottomSheet.show(context, track: track);
-/// ```
 class EditTrackBottomSheet extends StatefulWidget {
   final MusicTrack track;
 
   const EditTrackBottomSheet._({required this.track});
 
-  /// Abre o BottomSheet de edição. Retorna true se os dados foram salvos.
   static Future<bool> show(
     BuildContext context, {
     required MusicTrack track,
@@ -37,7 +32,6 @@ class _EditTrackBottomSheetState extends State<EditTrackBottomSheet> {
   late final TextEditingController _titleCtrl;
   late final TextEditingController _artistCtrl;
   late final TextEditingController _albumCtrl;
-
   bool _isSaving = false;
 
   @override
@@ -59,11 +53,8 @@ class _EditTrackBottomSheetState extends State<EditTrackBottomSheet> {
   Future<void> _save() async {
     if (!_formKey.currentState!.validate()) return;
     if (_isSaving) return;
-
     setState(() => _isSaving = true);
-
     final config = context.read<Configuration>();
-
     final success = await config.editTrack(
       track: widget.track,
       newTitle: _titleCtrl.text.trim(),
@@ -71,14 +62,43 @@ class _EditTrackBottomSheetState extends State<EditTrackBottomSheet> {
       newAlbum: _albumCtrl.text.trim(),
       context: context,
     );
-
     if (!mounted) return;
     setState(() => _isSaving = false);
+    if (success) Navigator.of(context).pop(true);
+  }
 
-    if (success) {
-      Navigator.of(context).pop(true);
+  Future<void> _addToPlaylist() async {
+    final playlists = await PlaylistDatabase.instance.readAllPlaylists();
+    if (!mounted) return;
+
+    final result = await showDialog<dynamic>(
+      context: context,
+      builder: (_) => _PickPlaylistDialog(playlists: playlists),
+    );
+    if (result == null) return;
+
+    int playlistId;
+    if (result is String) {
+      final newPlaylist = await PlaylistDatabase.instance.createPlaylist(
+        result,
+      );
+      playlistId = newPlaylist.id!;
+    } else if (result is int) {
+      playlistId = result;
+    } else {
+      return;
     }
-    // Se não teve sucesso, o editTrack já exibiu o erro — apenas fecha o loading
+
+    await PlaylistDatabase.instance.addTracks(playlistId, [widget.track.id!]);
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('Música adicionada à playlist!'),
+          behavior: SnackBarBehavior.floating,
+          backgroundColor: Theme.of(context).colorScheme.primary,
+        ),
+      );
+    }
   }
 
   @override
@@ -98,7 +118,6 @@ class _EditTrackBottomSheetState extends State<EditTrackBottomSheet> {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Alça visual
           Center(
             child: Container(
               width: 40,
@@ -110,27 +129,45 @@ class _EditTrackBottomSheetState extends State<EditTrackBottomSheet> {
               ),
             ),
           ),
-
-          Text(
-            'Editar informações',
-            style: TextStyle(
-              fontSize: 18,
-              fontWeight: FontWeight.bold,
-              color: colorScheme.onSurface,
-            ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            widget.track.path.split('/').last,
-            style: TextStyle(
-              fontSize: 12,
-              color: colorScheme.onSurfaceVariant.withValues(alpha: 0.6),
-            ),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
+          Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Editar informações',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                        color: colorScheme.onSurface,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      widget.track.path.split('/').last,
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: colorScheme.onSurfaceVariant.withValues(
+                          alpha: 0.6,
+                        ),
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ),
+              ),
+              // Botão adicionar à playlist
+              IconButton(
+                onPressed: _addToPlaylist,
+                icon: const Icon(Icons.playlist_add_outlined),
+                tooltip: 'Adicionar à playlist',
+                color: colorScheme.primary,
+              ),
+            ],
           ),
           const SizedBox(height: 24),
-
           Form(
             key: _formKey,
             child: Column(
@@ -157,9 +194,7 @@ class _EditTrackBottomSheetState extends State<EditTrackBottomSheet> {
               ],
             ),
           ),
-
           const SizedBox(height: 28),
-
           Row(
             children: [
               Expanded(
@@ -230,6 +265,79 @@ class _Field extends StatelessWidget {
         filled: true,
         fillColor: colorScheme.surfaceContainerHighest.withValues(alpha: 0.4),
       ),
+    );
+  }
+}
+
+class _PickPlaylistDialog extends StatelessWidget {
+  final List<Playlist> playlists;
+  const _PickPlaylistDialog({required this.playlists});
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return AlertDialog(
+      title: const Text('Adicionar à playlist'),
+      content: SizedBox(
+        width: double.maxFinite,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: Icon(
+                Icons.add_circle_outline,
+                color: colorScheme.primary,
+              ),
+              title: const Text('Nova playlist'),
+              onTap: () async {
+                final controller = TextEditingController();
+                final name = await showDialog<String>(
+                  context: context,
+                  builder: (_) => AlertDialog(
+                    title: const Text('Nome da playlist'),
+                    content: TextField(
+                      controller: controller,
+                      autofocus: true,
+                      decoration: const InputDecoration(labelText: 'Nome'),
+                    ),
+                    actions: [
+                      TextButton(
+                        onPressed: () => Navigator.pop(context),
+                        child: const Text('Cancelar'),
+                      ),
+                      FilledButton(
+                        onPressed: () =>
+                            Navigator.pop(context, controller.text.trim()),
+                        child: const Text('Criar'),
+                      ),
+                    ],
+                  ),
+                );
+                if (name != null && name.isNotEmpty && context.mounted) {
+                  Navigator.pop(context, name);
+                }
+              },
+            ),
+            if (playlists.isNotEmpty) const Divider(),
+            ...playlists.map(
+              (p) => ListTile(
+                leading: const Icon(Icons.library_music_outlined),
+                title: Text(p.name),
+                subtitle: Text(
+                  '${p.trackIds.length} música${p.trackIds.length == 1 ? '' : 's'}',
+                ),
+                onTap: () => Navigator.pop(context, p.id),
+              ),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancelar'),
+        ),
+      ],
     );
   }
 }
