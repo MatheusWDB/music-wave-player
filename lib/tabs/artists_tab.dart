@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:music_wave_player/models/music_track.dart';
-import 'package:music_wave_player/screens/full_player_screen.dart';
+import 'package:music_wave_player/screens/artist_detail_screen.dart';
 
 class ArtistsTab extends StatelessWidget {
   final List<MusicTrack> tracks;
@@ -8,13 +8,11 @@ class ArtistsTab extends StatelessWidget {
 
   const ArtistsTab({super.key, required this.tracks, required this.onTrackTap});
 
-  /// Agrupa as faixas por artista, retornando um mapa ordenado alfabeticamente.
   Map<String, List<MusicTrack>> _groupByArtist() {
     final Map<String, List<MusicTrack>> grouped = {};
     for (final track in tracks) {
       grouped.putIfAbsent(track.artist, () => []).add(track);
     }
-    // Ordena os artistas alfabeticamente
     final sortedKeys = grouped.keys.toList()
       ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
     return {for (final key in sortedKeys) key: grouped[key]!};
@@ -34,7 +32,7 @@ class ArtistsTab extends StatelessWidget {
         final artist = artists[index];
         final artistTracks = grouped[artist]!;
 
-        return ExpansionTile(
+        return ListTile(
           leading: CircleAvatar(
             backgroundColor: colorScheme.primaryContainer,
             child: Icon(Icons.person, color: colorScheme.onPrimaryContainer),
@@ -53,33 +51,17 @@ class ArtistsTab extends StatelessWidget {
               fontSize: 12.0,
             ),
           ),
-          children: artistTracks.map((track) {
-            return ListTile(
-              contentPadding: const EdgeInsets.only(left: 72.0, right: 16.0),
-              title: Text(
-                track.title,
-                style: TextStyle(color: colorScheme.onSurface),
-                overflow: TextOverflow.ellipsis,
-              ),
-              subtitle: Text(
-                track.album,
-                style: TextStyle(
-                  color: colorScheme.onSurfaceVariant,
-                  fontSize: 12.0,
-                ),
-                overflow: TextOverflow.ellipsis,
-              ),
-              onTap: () {
-                onTrackTap(track.id!);
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => FullPlayerScreen(initialTrackId: track.id!),
-                  ),
-                );
-              },
-            );
-          }).toList(),
+          trailing: Icon(
+            Icons.chevron_right,
+            color: colorScheme.onSurfaceVariant,
+          ),
+          onTap: () => Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) =>
+                  ArtistDetailScreen(artist: artist, tracks: artistTracks),
+            ),
+          ),
         );
       },
     );

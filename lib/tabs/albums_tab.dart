@@ -1,6 +1,8 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:music_wave_player/models/music_track.dart';
-import 'package:music_wave_player/screens/full_player_screen.dart';
+import 'package:music_wave_player/screens/album_detail_screen.dart';
 
 class AlbumsTab extends StatelessWidget {
   final List<MusicTrack> tracks;
@@ -8,7 +10,6 @@ class AlbumsTab extends StatelessWidget {
 
   const AlbumsTab({super.key, required this.tracks, required this.onTrackTap});
 
-  /// Agrupa as faixas por álbum, retornando um mapa ordenado alfabeticamente.
   Map<String, List<MusicTrack>> _groupByAlbum() {
     final Map<String, List<MusicTrack>> grouped = {};
     for (final track in tracks) {
@@ -32,18 +33,28 @@ class AlbumsTab extends StatelessWidget {
       itemBuilder: (context, index) {
         final album = albums[index];
         final albumTracks = grouped[album]!;
-        // Pega o artista mais comum do álbum para exibir no subtítulo
-        final artist = albumTracks.first.artist;
+        final coverPath = albumTracks
+            .firstWhere(
+              (t) => t.coverPath != null,
+              orElse: () => albumTracks.first,
+            )
+            .coverPath;
 
-        return ExpansionTile(
-          leading: Container(
-            width: 40,
-            height: 40,
-            decoration: BoxDecoration(
-              color: colorScheme.primaryContainer,
-              borderRadius: BorderRadius.circular(6.0),
+        return ListTile(
+          leading: ClipRRect(
+            borderRadius: BorderRadius.circular(6),
+            child: SizedBox(
+              width: 44,
+              height: 44,
+              child: coverPath != null
+                  ? Image.file(
+                      File(coverPath),
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, __, ___) =>
+                          _AlbumPlaceholder(colorScheme: colorScheme),
+                    )
+                  : _AlbumPlaceholder(colorScheme: colorScheme),
             ),
-            child: Icon(Icons.album, color: colorScheme.onPrimaryContainer),
           ),
           title: Text(
             album,
@@ -51,44 +62,44 @@ class AlbumsTab extends StatelessWidget {
               color: colorScheme.onSurface,
               fontWeight: FontWeight.w600,
             ),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
           ),
           subtitle: Text(
-            '$artist · ${albumTracks.length} música${albumTracks.length == 1 ? '' : 's'}',
+            '${albumTracks.first.artist} · ${albumTracks.length} música${albumTracks.length == 1 ? '' : 's'}',
             style: TextStyle(
               color: colorScheme.onSurfaceVariant,
               fontSize: 12.0,
             ),
+            maxLines: 1,
             overflow: TextOverflow.ellipsis,
           ),
-          children: albumTracks.map((track) {
-            return ListTile(
-              contentPadding: const EdgeInsets.only(left: 72.0, right: 16.0),
-              title: Text(
-                track.title,
-                style: TextStyle(color: colorScheme.onSurface),
-                overflow: TextOverflow.ellipsis,
-              ),
-              subtitle: Text(
-                track.artist,
-                style: TextStyle(
-                  color: colorScheme.onSurfaceVariant,
-                  fontSize: 12.0,
-                ),
-                overflow: TextOverflow.ellipsis,
-              ),
-              onTap: () {
-                onTrackTap(track.id!);
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => FullPlayerScreen(initialTrackId: track.id!),
-                  ),
-                );
-              },
-            );
-          }).toList(),
+          trailing: Icon(
+            Icons.chevron_right,
+            color: colorScheme.onSurfaceVariant,
+          ),
+          onTap: () => Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) =>
+                  AlbumDetailScreen(album: album, tracks: albumTracks),
+            ),
+          ),
         );
       },
+    );
+  }
+}
+
+class _AlbumPlaceholder extends StatelessWidget {
+  final ColorScheme colorScheme;
+  const _AlbumPlaceholder({required this.colorScheme});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      color: colorScheme.primaryContainer,
+      child: Icon(Icons.album, color: colorScheme.onPrimaryContainer),
     );
   }
 }

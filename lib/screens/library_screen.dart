@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:music_wave_player/components/library_components/mini_player_component.dart';
 import 'package:music_wave_player/components/library_components/tabs_component.dart';
 import 'package:music_wave_player/screens/root_directory_config_screen.dart';
+import 'package:music_wave_player/screens/search_screen.dart';
 
 class LibraryScreen extends StatelessWidget {
   const LibraryScreen({super.key});
@@ -33,7 +34,10 @@ class LibraryScreen extends StatelessWidget {
                     ),
                   ),
                   IconButton(
-                    onPressed: () {},
+                    onPressed: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (_) => const SearchScreen()),
+                    ),
                     icon: Icon(Icons.search, color: colorScheme.onSurface),
                   ),
                   IconButton(

@@ -399,6 +399,23 @@ class Configuration with ChangeNotifier, DiagnosticableTreeMixin {
     _audioHandler?.play();
   }
 
+  /// Toca uma lista arbitrária de faixas (artista, álbum, etc.),
+  /// substituindo a fila atual.
+  void playTracks(List<MusicTrack> tracks) {
+    if (tracks.isEmpty) return;
+    _playbackQueue = tracks.map((t) => t.id!).toList();
+    _currentQueueIndex = 0;
+    _lastPlayedMusicId = tracks.first.id;
+    _saveLastPlayedMusicId(tracks.first.id!);
+    _lastSeekPositionMs = 0;
+    _currentPositionMs = 0;
+    _trackDurationMs = 0;
+    _audioHandler?.customAction('loadTrack', {'path': currentTrackPath});
+    _isPlaying = true;
+    notifyListeners();
+    _audioHandler?.play();
+  }
+
   // ── Edição de metadados ───────────────────────────────────────────────────
 
   Future<bool> editTrack({
