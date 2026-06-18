@@ -91,11 +91,23 @@ class _PlaylistDetailScreenState extends State<PlaylistDetailScreen> {
     await _reload();
   }
 
+  void _showQueueSnack(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        behavior: SnackBarBehavior.floating,
+        duration: const Duration(seconds: 2),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
-    final allTracks = context.read<Configuration>().indexedTracks;
+    final config = context.read<Configuration>();
+    final allTracks = config.indexedTracks;
     final tracks = _getTracks(allTracks);
+    final ids = tracks.map((t) => t.id!).toList();
 
     return Scaffold(
       appBar: AppBar(
@@ -109,18 +121,44 @@ class _PlaylistDetailScreenState extends State<PlaylistDetailScreen> {
           PopupMenuButton<String>(
             onSelected: (value) async {
               if (value == 'play') {
-                context.read<Configuration>().playPlaylist(_playlist);
+                config.playPlaylist(_playlist);
                 Navigator.pop(context);
+              } else if (value == 'insert_next') {
+                config.insertAfterCurrent(ids);
+                _showQueueSnack('Músicas adicionadas após a atual');
+              } else if (value == 'add_end') {
+                config.addToEndOfQueue(ids);
+                _showQueueSnack('Músicas adicionadas ao final da fila');
               }
             },
-            itemBuilder: (_) => [
-              const PopupMenuItem(
+            itemBuilder: (_) => const [
+              PopupMenuItem(
                 value: 'play',
                 child: Row(
                   children: [
                     Icon(Icons.play_arrow_outlined),
                     SizedBox(width: 12),
                     Text('Tocar playlist'),
+                  ],
+                ),
+              ),
+              PopupMenuItem(
+                value: 'insert_next',
+                child: Row(
+                  children: [
+                    Icon(Icons.queue_play_next_outlined),
+                    SizedBox(width: 12),
+                    Text('Tocar a seguir'),
+                  ],
+                ),
+              ),
+              PopupMenuItem(
+                value: 'add_end',
+                child: Row(
+                  children: [
+                    Icon(Icons.add_to_queue_outlined),
+                    SizedBox(width: 12),
+                    Text('Adicionar à fila'),
                   ],
                 ),
               ),
@@ -132,7 +170,7 @@ class _PlaylistDetailScreenState extends State<PlaylistDetailScreen> {
           ? const Center(child: CircularProgressIndicator())
           : Column(
               children: [
-                // Cabeçalho com info da playlist
+                // Cabeçalho
                 Padding(
                   padding: const EdgeInsets.all(20),
                   child: Row(
@@ -179,13 +217,10 @@ class _PlaylistDetailScreenState extends State<PlaylistDetailScreen> {
                           ],
                         ),
                       ),
-                      // Botão tocar
                       if (tracks.isNotEmpty)
                         FilledButton.icon(
                           onPressed: () {
-                            context.read<Configuration>().playPlaylist(
-                              _playlist,
-                            );
+                            config.playPlaylist(_playlist);
                             Navigator.pop(context);
                           },
                           icon: const Icon(Icons.play_arrow),

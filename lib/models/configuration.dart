@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:math';
 
 import 'package:audio_service/audio_service.dart';
 import 'package:flutter/foundation.dart';
@@ -236,6 +237,8 @@ class Configuration with ChangeNotifier, DiagnosticableTreeMixin {
   String _repeatMode = 'Off';
   bool _isPlaying = false;
   List<int> _playbackQueue = [];
+  // Guarda a ordem original da fila para restaurar ao desativar shuffle.
+  List<int> _originalQueue = [];
   int _currentQueueIndex = -1;
   int _currentPositionMs = 0;
   int _trackDurationMs = 0;
@@ -337,15 +340,17 @@ class Configuration with ChangeNotifier, DiagnosticableTreeMixin {
     final id = _playbackQueue.removeAt(oldIndex);
     _playbackQueue.insert(newIndex, id);
     _currentQueueIndex = _playbackQueue.indexOf(_lastPlayedMusicId!);
+    // Reordenação manual invalida a ordem original.
+    _originalQueue = List.of(_playbackQueue);
     notifyListeners();
   }
 
   void removeFromQueue(int index) {
     if (index < 0 || index >= _playbackQueue.length) return;
     final removingCurrent = index == _currentQueueIndex;
-    _playbackQueue.removeAt(index);
+    final removedId = _playbackQueue.removeAt(index);
+    _originalQueue.remove(removedId);
     if (removingCurrent) {
-      // Se removeu a atual, toca a próxima (ou para se ficou vazia)
       if (_playbackQueue.isEmpty) {
         _lastPlayedMusicId = null;
         _currentQueueIndex = -1;
@@ -366,16 +371,100 @@ class Configuration with ChangeNotifier, DiagnosticableTreeMixin {
     playTrack(_playbackQueue[index], regenerateQueue: false);
   }
 
+  /// Remove todas as músicas da fila exceto a que está tocando atualmente.
+  void clearQueue() {
+    if (_lastPlayedMusicId == null) return;
+    _playbackQueue = [_lastPlayedMusicId!];
+    _originalQueue = [_lastPlayedMusicId!];
+    _currentQueueIndex = 0;
+    notifyListeners();
+  }
+
+  /// Insere [ids] imediatamente após a música atual na fila.
+  void insertAfterCurrent(List<int> ids) {
+    if (ids.isEmpty) return;
+    final insertAt = _currentQueueIndex + 1;
+    for (int i = 0; i < ids.length; i++) {
+      _playbackQueue.insert(insertAt + i, ids[i]);
+      _originalQueue.insert(insertAt + i, ids[i]);
+    }
+    notifyListeners();
+  }
+
+  /// Adiciona [ids] ao final da fila atual.
+  void addToEndOfQueue(List<int> ids) {
+    if (ids.isEmpty) return;
+    _playbackQueue.addAll(ids);
+    _originalQueue.addAll(ids);
+    notifyListeners();
+  }
+
   Future<void> _triggerMediaScan(String dirPath) async {
     try {
       await _safChannel.invokeMethod('scanMedia', {'path': dirPath});
     } catch (_) {}
   }
 
+  // ── Shuffle ───────────────────────────────────────────────────────────────
+
+  /// Ativa: embaralha a fila atual mantendo a música corrente no seu índice.
+  /// Desativa: restaura a ordem original, reposicionando a atual corretamente.
+  void toggleShuffle() {
+    _isShuffleActive = !_isShuffleActive;
+    if (_isShuffleActive) {
+      _applyShuffleToCurrentQueue();
+    } else {
+      _restoreOriginalQueue();
+    }
+    notifyListeners();
+  }
+
+  /// Embaralha a fila mantendo a música atual no lugar:
+  /// - Músicas antes dela → embaralhadas entre si, permanecem antes
+  /// - Música atual → índice inalterado
+  /// - Músicas depois dela → embaralhadas entre si, permanecem depois
+  void _applyShuffleToCurrentQueue() {
+    if (_playbackQueue.length <= 1) return;
+
+    _originalQueue = List.of(_playbackQueue);
+
+    final rng = Random();
+    final before = _playbackQueue.sublist(0, _currentQueueIndex)..shuffle(rng);
+    final current = _playbackQueue[_currentQueueIndex];
+    final after = _playbackQueue.sublist(_currentQueueIndex + 1)..shuffle(rng);
+
+    _playbackQueue = [...before, current, ...after];
+    // _currentQueueIndex não muda pois a atual permanece no mesmo índice.
+  }
+
+  /// Restaura a ordem original, mantendo a música atual no lugar certo.
+  void _restoreOriginalQueue() {
+    if (_originalQueue.isEmpty) return;
+    _playbackQueue = List.of(_originalQueue);
+    if (_lastPlayedMusicId != null) {
+      _currentQueueIndex = _playbackQueue.indexOf(_lastPlayedMusicId!);
+    }
+  }
+
+  // ── Fila ─────────────────────────────────────────────────────────────────
+
+  /// Define uma nova fila a partir de uma lista ordenada de IDs.
+  /// Se shuffle estiver ativo, embaralha imediatamente (exceto o primeiro).
+  void _setQueue(List<int> orderedIds) {
+    _originalQueue = List.of(orderedIds);
+    _currentQueueIndex = 0;
+
+    if (_isShuffleActive && orderedIds.length > 1) {
+      final first = orderedIds.first;
+      final rest = orderedIds.sublist(1)..shuffle();
+      _playbackQueue = [first, ...rest];
+    } else {
+      _playbackQueue = List.of(orderedIds);
+    }
+  }
+
   // ── Playlist ──────────────────────────────────────────────────────────────
 
-  /// Insere as faixas da playlist na fila imediatamente após a música atual,
-  /// descartando o que viria depois. Começa a tocar a primeira faixa da playlist.
   void playPlaylist(Playlist playlist) {
     if (playlist.trackIds.isEmpty) return;
 
@@ -384,12 +473,10 @@ class Configuration with ChangeNotifier, DiagnosticableTreeMixin {
         .toList();
     if (validIds.isEmpty) return;
 
-    _playbackQueue = List.of(validIds);
-    _currentQueueIndex = 0;
+    _setQueue(validIds);
 
-    final firstId = validIds.first;
-    _lastPlayedMusicId = firstId;
-    _saveLastPlayedMusicId(firstId);
+    _lastPlayedMusicId = _playbackQueue.first;
+    _saveLastPlayedMusicId(_lastPlayedMusicId!);
     _lastSeekPositionMs = 0;
     _currentPositionMs = 0;
     _trackDurationMs = 0;
@@ -399,14 +486,13 @@ class Configuration with ChangeNotifier, DiagnosticableTreeMixin {
     _audioHandler?.play();
   }
 
-  /// Toca uma lista arbitrária de faixas (artista, álbum, etc.),
-  /// substituindo a fila atual.
   void playTracks(List<MusicTrack> tracks) {
     if (tracks.isEmpty) return;
-    _playbackQueue = tracks.map((t) => t.id!).toList();
-    _currentQueueIndex = 0;
-    _lastPlayedMusicId = tracks.first.id;
-    _saveLastPlayedMusicId(tracks.first.id!);
+
+    _setQueue(tracks.map((t) => t.id!).toList());
+
+    _lastPlayedMusicId = _playbackQueue.first;
+    _saveLastPlayedMusicId(_lastPlayedMusicId!);
     _lastSeekPositionMs = 0;
     _currentPositionMs = 0;
     _trackDurationMs = 0;
@@ -527,8 +613,11 @@ class Configuration with ChangeNotifier, DiagnosticableTreeMixin {
     await p.setString(_kRootDirectoryKey, path);
   }
 
+  /// Gera a fila a partir de todas as músicas indexadas.
+  /// Chamado apenas ao carregar o app ou após reindexação.
   void _regenerateQueue() {
     final ids = _indexedTracks.map((t) => t.id!).toList();
+    _originalQueue = List.of(ids);
     _playbackQueue = _isShuffleActive ? (List.of(ids)..shuffle()) : ids;
     if (_lastPlayedMusicId != null) {
       _currentQueueIndex = _playbackQueue.indexOf(_lastPlayedMusicId!);
@@ -666,12 +755,6 @@ class Configuration with ChangeNotifier, DiagnosticableTreeMixin {
     }
     _currentQueueIndex = prev;
     playTrack(_playbackQueue[prev], regenerateQueue: false);
-  }
-
-  void toggleShuffle() {
-    _isShuffleActive = !_isShuffleActive;
-    _regenerateQueue();
-    notifyListeners();
   }
 
   void toggleRepeatMode() {

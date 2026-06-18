@@ -2,9 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:music_wave_player/components/cover_art_widget.dart';
 import 'package:music_wave_player/components/edit_track_bottom_sheet.dart';
 import 'package:music_wave_player/data/playlist_database.dart';
+import 'package:music_wave_player/models/configuration.dart';
 import 'package:music_wave_player/models/music_track.dart';
 import 'package:music_wave_player/models/playlist.dart';
 import 'package:music_wave_player/screens/full_player_screen.dart';
+import 'package:provider/provider.dart';
 
 class MusicsTab extends StatefulWidget {
   final List<MusicTrack> tracks;
@@ -36,7 +38,6 @@ class _MusicsTabState extends State<MusicsTab> {
     final playlists = await PlaylistDatabase.instance.readAllPlaylists();
     if (!mounted) return;
 
-    // Mostra dialog para escolher playlist existente ou criar nova
     final result = await showDialog<dynamic>(
       context: context,
       builder: (_) => _PickPlaylistDialog(playlists: playlists),
@@ -45,9 +46,7 @@ class _MusicsTabState extends State<MusicsTab> {
     if (result == null) return;
 
     int playlistId;
-
     if (result is String) {
-      // Criar nova playlist com esse nome
       final newPlaylist = await PlaylistDatabase.instance.createPlaylist(
         result,
       );
@@ -72,9 +71,20 @@ class _MusicsTabState extends State<MusicsTab> {
     }
   }
 
+  void _showQueueSnack(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        behavior: SnackBarBehavior.floating,
+        duration: const Duration(seconds: 2),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
+    final config = context.read<Configuration>();
 
     return Stack(
       children: [
@@ -111,7 +121,6 @@ class _MusicsTabState extends State<MusicsTab> {
                   padding: const EdgeInsets.all(10),
                   child: Row(
                     children: [
-                      // Checkbox visível no modo seleção, capa fora dele
                       if (_isSelecting)
                         Padding(
                           padding: const EdgeInsets.only(right: 10),
@@ -167,9 +176,37 @@ class _MusicsTabState extends State<MusicsTab> {
                             } else if (value == 'playlist') {
                               setState(() => _selected.add(track.id!));
                               await _addSelectedToPlaylist();
+                            } else if (value == 'insert_next') {
+                              config.insertAfterCurrent([track.id!]);
+                              _showQueueSnack('Música adicionada após a atual');
+                            } else if (value == 'add_end') {
+                              config.addToEndOfQueue([track.id!]);
+                              _showQueueSnack(
+                                'Música adicionada ao final da fila',
+                              );
                             }
                           },
                           itemBuilder: (_) => const [
+                            PopupMenuItem(
+                              value: 'insert_next',
+                              child: Row(
+                                children: [
+                                  Icon(Icons.queue_play_next_outlined),
+                                  SizedBox(width: 12),
+                                  Text('Tocar a seguir'),
+                                ],
+                              ),
+                            ),
+                            PopupMenuItem(
+                              value: 'add_end',
+                              child: Row(
+                                children: [
+                                  Icon(Icons.add_to_queue_outlined),
+                                  SizedBox(width: 12),
+                                  Text('Adicionar à fila'),
+                                ],
+                              ),
+                            ),
                             PopupMenuItem(
                               value: 'edit',
                               child: Row(
@@ -245,7 +282,6 @@ class _MusicsTabState extends State<MusicsTab> {
   }
 }
 
-// Dialog para escolher playlist existente ou criar nova
 class _PickPlaylistDialog extends StatelessWidget {
   final List<Playlist> playlists;
   const _PickPlaylistDialog({required this.playlists});
@@ -260,7 +296,6 @@ class _PickPlaylistDialog extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            // Opção criar nova
             ListTile(
               leading: Icon(
                 Icons.add_circle_outline,
@@ -292,12 +327,11 @@ class _PickPlaylistDialog extends StatelessWidget {
                   ),
                 );
                 if (name != null && name.isNotEmpty && context.mounted) {
-                  Navigator.pop(context, name); // retorna String = criar nova
+                  Navigator.pop(context, name);
                 }
               },
             ),
             if (playlists.isNotEmpty) const Divider(),
-            // Playlists existentes
             ...playlists.map(
               (p) => ListTile(
                 leading: const Icon(Icons.library_music_outlined),
@@ -305,7 +339,7 @@ class _PickPlaylistDialog extends StatelessWidget {
                 subtitle: Text(
                   '${p.trackIds.length} música${p.trackIds.length == 1 ? '' : 's'}',
                 ),
-                onTap: () => Navigator.pop(context, p.id), // retorna int = id
+                onTap: () => Navigator.pop(context, p.id),
               ),
             ),
           ],

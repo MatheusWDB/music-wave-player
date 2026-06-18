@@ -15,21 +15,69 @@ class AlbumDetailScreen extends StatelessWidget {
     required this.tracks,
   });
 
+  void _showQueueSnack(BuildContext context, String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        behavior: SnackBarBehavior.floating,
+        duration: const Duration(seconds: 2),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     final config = context.read<Configuration>();
+    final ids = tracks.map((t) => t.id!).toList();
 
-    // Capa do álbum: usa a primeira faixa que tiver coverPath
     final coverPath = tracks
         .firstWhere((t) => t.coverPath != null, orElse: () => tracks.first)
         .coverPath;
-
-    // Artista mais representativo (primeiro da lista)
     final artist = tracks.first.artist;
 
     return Scaffold(
-      appBar: AppBar(title: Text(album)),
+      appBar: AppBar(
+        title: Text(album),
+        actions: [
+          PopupMenuButton<String>(
+            onSelected: (value) {
+              if (value == 'insert_next') {
+                config.insertAfterCurrent(ids);
+                _showQueueSnack(context, 'Músicas adicionadas após a atual');
+              } else if (value == 'add_end') {
+                config.addToEndOfQueue(ids);
+                _showQueueSnack(
+                  context,
+                  'Músicas adicionadas ao final da fila',
+                );
+              }
+            },
+            itemBuilder: (_) => const [
+              PopupMenuItem(
+                value: 'insert_next',
+                child: Row(
+                  children: [
+                    Icon(Icons.queue_play_next_outlined),
+                    SizedBox(width: 12),
+                    Text('Tocar a seguir'),
+                  ],
+                ),
+              ),
+              PopupMenuItem(
+                value: 'add_end',
+                child: Row(
+                  children: [
+                    Icon(Icons.add_to_queue_outlined),
+                    SizedBox(width: 12),
+                    Text('Adicionar à fila'),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
       body: Column(
         children: [
           // Cabeçalho

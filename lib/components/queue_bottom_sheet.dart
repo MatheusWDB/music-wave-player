@@ -29,6 +29,35 @@ class _QueueBottomSheetState extends State<QueueBottomSheet> {
     super.dispose();
   }
 
+  Future<void> _confirmClearQueue(
+    BuildContext context,
+    Configuration config,
+  ) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Limpar fila'),
+        content: const Text(
+          'Remover todas as músicas da fila exceto a que está tocando?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(context).colorScheme.error,
+            ),
+            child: const Text('Limpar'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true) config.clearQueue();
+  }
+
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
@@ -50,7 +79,6 @@ class _QueueBottomSheetState extends State<QueueBottomSheet> {
         ? trackById(fullQueue[currentIndex])
         : null;
 
-    // Apenas as músicas seguintes à atual
     final nextQueue = currentIndex >= 0 && currentIndex + 1 < fullQueue.length
         ? fullQueue.sublist(currentIndex + 1)
         : <int>[];
@@ -90,6 +118,12 @@ class _QueueBottomSheetState extends State<QueueBottomSheet> {
                     ),
                   ),
                 ),
+                if (nextQueue.isNotEmpty)
+                  IconButton(
+                    icon: Icon(Icons.playlist_remove, color: colorScheme.error),
+                    tooltip: 'Limpar fila',
+                    onPressed: () => _confirmClearQueue(context, config),
+                  ),
                 TextButton(
                   onPressed: () => Navigator.pop(context),
                   child: const Text('Fechar'),
@@ -99,7 +133,7 @@ class _QueueBottomSheetState extends State<QueueBottomSheet> {
           ),
           const Divider(height: 1),
 
-          // Música atual — fixada no topo, fora do ReorderableListView
+          // Música atual
           if (currentTrack != null)
             _CurrentTile(
               track: currentTrack,
@@ -110,7 +144,7 @@ class _QueueBottomSheetState extends State<QueueBottomSheet> {
 
           if (nextQueue.isNotEmpty) const Divider(height: 1),
 
-          // Próximas músicas — reordenáveis
+          // Próximas músicas
           Expanded(
             child: nextQueue.isEmpty
                 ? Center(
@@ -126,7 +160,6 @@ class _QueueBottomSheetState extends State<QueueBottomSheet> {
                     padding: const EdgeInsets.only(bottom: 16),
                     itemCount: nextQueue.length,
                     onReorder: (oldIndex, newIndex) {
-                      // Offset: próximas começam em currentIndex + 1
                       final realOld = currentIndex + 1 + oldIndex;
                       final realNew = currentIndex + 1 + newIndex;
                       config.reorderQueue(realOld, realNew);
