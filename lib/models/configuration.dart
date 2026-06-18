@@ -283,6 +283,7 @@ class Configuration with ChangeNotifier, DiagnosticableTreeMixin {
   String get repeatMode => _repeatMode;
   bool get isPlaying => _isPlaying;
   int get currentQueueIndex => _currentQueueIndex;
+  List<int> get playbackQueue => List.unmodifiable(_playbackQueue);
   int get currentPositionMs => _currentPositionMs;
   int get trackDurationMs => _trackDurationMs;
   String? get currentTrackPath => currentTrack?.path;
@@ -330,6 +331,40 @@ class Configuration with ChangeNotifier, DiagnosticableTreeMixin {
   }
 
   void seekTo(int ms) => _audioHandler?.seek(Duration(milliseconds: ms));
+
+  void reorderQueue(int oldIndex, int newIndex) {
+    if (oldIndex < newIndex) newIndex -= 1;
+    final id = _playbackQueue.removeAt(oldIndex);
+    _playbackQueue.insert(newIndex, id);
+    _currentQueueIndex = _playbackQueue.indexOf(_lastPlayedMusicId!);
+    notifyListeners();
+  }
+
+  void removeFromQueue(int index) {
+    if (index < 0 || index >= _playbackQueue.length) return;
+    final removingCurrent = index == _currentQueueIndex;
+    _playbackQueue.removeAt(index);
+    if (removingCurrent) {
+      // Se removeu a atual, toca a próxima (ou para se ficou vazia)
+      if (_playbackQueue.isEmpty) {
+        _lastPlayedMusicId = null;
+        _currentQueueIndex = -1;
+        _audioHandler?.pause();
+      } else {
+        _currentQueueIndex = index.clamp(0, _playbackQueue.length - 1);
+        playTrack(_playbackQueue[_currentQueueIndex], regenerateQueue: false);
+      }
+    } else {
+      _currentQueueIndex = _playbackQueue.indexOf(_lastPlayedMusicId!);
+    }
+    notifyListeners();
+  }
+
+  void jumpToQueueIndex(int index) {
+    if (index < 0 || index >= _playbackQueue.length) return;
+    _currentQueueIndex = index;
+    playTrack(_playbackQueue[index], regenerateQueue: false);
+  }
 
   Future<void> _triggerMediaScan(String dirPath) async {
     try {

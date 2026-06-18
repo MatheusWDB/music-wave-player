@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:music_wave_player/components/cover_art_widget.dart';
 import 'package:music_wave_player/components/edit_track_bottom_sheet.dart';
+import 'package:music_wave_player/components/queue_bottom_sheet.dart';
 import 'package:music_wave_player/models/configuration.dart';
 import 'package:music_wave_player/models/music_track.dart';
 import 'package:provider/provider.dart';
@@ -86,6 +87,11 @@ class _FullPlayerScreenState extends State<FullPlayerScreen>
         title: const Text('LocalPlay'),
         centerTitle: true,
         actions: [
+          IconButton(
+            icon: const Icon(Icons.queue_music),
+            tooltip: 'Fila de reprodução',
+            onPressed: () => QueueBottomSheet.show(context),
+          ),
           PopupMenuButton<String>(
             icon: const Icon(Icons.more_vert),
             onSelected: (value) {
