@@ -9,8 +9,10 @@ class MusicTrack {
   final bool isEdited;
 
   /// Caminho local da capa extraída e salva no cache do app.
-  /// Null se o arquivo não tiver capa embutida.
   final String? coverPath;
+
+  /// Duração em milissegundos. 0 se ainda não lida.
+  final int durationMs;
 
   static const List<String> supportedExtensions = [
     '.mp3',
@@ -28,6 +30,7 @@ class MusicTrack {
     required this.album,
     this.isEdited = false,
     this.coverPath,
+    this.durationMs = 0,
   });
 
   MusicTrack copyWith({
@@ -39,6 +42,7 @@ class MusicTrack {
     bool? isEdited,
     String? coverPath,
     bool clearCoverPath = false,
+    int? durationMs,
   }) {
     return MusicTrack(
       id: id ?? this.id,
@@ -48,6 +52,7 @@ class MusicTrack {
       album: album ?? this.album,
       isEdited: isEdited ?? this.isEdited,
       coverPath: clearCoverPath ? null : (coverPath ?? this.coverPath),
+      durationMs: durationMs ?? this.durationMs,
     );
   }
 
@@ -63,6 +68,7 @@ class MusicTrack {
     MusicDatabase.columnAlbum: album,
     MusicDatabase.columnIsEdited: isEdited ? 1 : 0,
     MusicDatabase.columnCoverPath: coverPath,
+    MusicDatabase.columnDurationMs: durationMs,
   };
 
   static MusicTrack fromMap(Map<String, Object?> map) => MusicTrack(
@@ -73,11 +79,12 @@ class MusicTrack {
     album: map[MusicDatabase.columnAlbum] as String,
     isEdited: (map[MusicDatabase.columnIsEdited] as int? ?? 0) == 1,
     coverPath: map[MusicDatabase.columnCoverPath] as String?,
+    durationMs: map[MusicDatabase.columnDurationMs] as int? ?? 0,
   );
 
   @override
   String toString() =>
       'MusicTrack: {id: $id, path: $path, title: $title, '
       'artist: $artist, album: $album, isEdited: $isEdited, '
-      'coverPath: $coverPath}';
+      'coverPath: $coverPath, durationMs: $durationMs}';
 }

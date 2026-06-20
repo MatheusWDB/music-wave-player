@@ -5,6 +5,7 @@ import 'package:music_wave_player/data/playlist_database.dart';
 import 'package:music_wave_player/models/configuration.dart';
 import 'package:music_wave_player/models/music_track.dart';
 import 'package:music_wave_player/models/playlist.dart';
+import 'package:music_wave_player/services/favorites_service.dart';
 import 'package:provider/provider.dart';
 
 class PlaylistDetailScreen extends StatefulWidget {
@@ -91,6 +92,16 @@ class _PlaylistDetailScreenState extends State<PlaylistDetailScreen> {
     await _reload();
   }
 
+  String _formatDuration(int totalMs) {
+    final d = Duration(milliseconds: totalMs);
+    final h = d.inHours;
+    final m = d.inMinutes.remainder(60);
+    final s = d.inSeconds.remainder(60);
+    if (h > 0) return '${h}h ${m.toString().padLeft(2, '0')}min';
+    if (m > 0) return '${m}min ${s.toString().padLeft(2, '0')}s';
+    return '${s}s';
+  }
+
   void _showQueueSnack(String message) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
@@ -113,11 +124,12 @@ class _PlaylistDetailScreenState extends State<PlaylistDetailScreen> {
       appBar: AppBar(
         title: Text(_playlist.name),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.edit_outlined),
-            onPressed: _rename,
-            tooltip: 'Renomear',
-          ),
+          if (_playlist.name != FavoritesService.favoritesName)
+            IconButton(
+              icon: const Icon(Icons.edit_outlined),
+              onPressed: _rename,
+              tooltip: 'Renomear',
+            ),
           PopupMenuButton<String>(
             onSelected: (value) async {
               if (value == 'play') {
@@ -209,7 +221,7 @@ class _PlaylistDetailScreenState extends State<PlaylistDetailScreen> {
                             ),
                             const SizedBox(height: 4),
                             Text(
-                              '${tracks.length} música${tracks.length == 1 ? '' : 's'}',
+                              '${tracks.length} música${tracks.length == 1 ? '' : 's'} · ${_formatDuration(tracks.fold(0, (sum, t) => sum + t.durationMs))}',
                               style: TextStyle(
                                 color: colorScheme.onSurfaceVariant,
                               ),

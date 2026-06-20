@@ -1,10 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:music_wave_player/components/sort_button.dart';
 import 'package:music_wave_player/models/configuration.dart';
 import 'package:music_wave_player/models/music_track.dart';
 import 'package:music_wave_player/tabs/musics_tab.dart';
-import 'package:music_wave_player/tabs/playlists_tab.dart';
 import 'package:music_wave_player/tabs/artists_tab.dart';
 import 'package:music_wave_player/tabs/albums_tab.dart';
+import 'package:music_wave_player/tabs/playlists_tab.dart';
 import 'package:provider/provider.dart';
 
 class TabsComponent extends StatefulWidget {
@@ -26,6 +27,29 @@ class _TabsComponentState extends State<TabsComponent>
     'Álbuns',
   ];
 
+  // Opções de ordenação disponíveis por aba
+  static const _sortOptionsMusics = [
+    SortOption.titleAsc,
+    SortOption.titleDesc,
+    SortOption.artistAsc,
+    SortOption.artistDesc,
+    SortOption.random,
+  ];
+  static const _sortOptionsPlaylists = [
+    SortOption.titleAsc,
+    SortOption.titleDesc,
+  ];
+  static const _sortOptionsArtists = [
+    SortOption.titleAsc,
+    SortOption.titleDesc,
+  ];
+  static const _sortOptionsAlbums = [
+    SortOption.titleAsc,
+    SortOption.titleDesc,
+    SortOption.artistAsc,
+    SortOption.artistDesc,
+  ];
+
   @override
   void initState() {
     super.initState();
@@ -38,20 +62,60 @@ class _TabsComponentState extends State<TabsComponent>
     super.dispose();
   }
 
-  Widget _buildContent(List<MusicTrack> tracks, Function(int) onTrackTap) {
+  Widget _buildContent(
+    List<MusicTrack> tracks,
+    Future<void> Function(int) onTrackTap,
+    Configuration config,
+  ) {
     switch (_activeMenu) {
       case 0:
-        return MusicsTab(tracks: tracks, onTrackTap: onTrackTap);
+        return MusicsTab(
+          tracks: config.applySortToTracks(tracks, config.sortMusics),
+          onTrackTap: onTrackTap,
+        );
       case 1:
-        return const PlaylistsTab();
+        return PlaylistsTab(sortOption: config.sortPlaylists);
       case 2:
-        // CORRIGIDO: aba de Artistas com agrupamento real
-        return ArtistsTab(tracks: tracks, onTrackTap: onTrackTap);
+        return ArtistsTab(
+          tracks: config.applySortToTracks(tracks, config.sortArtists),
+          onTrackTap: onTrackTap,
+        );
       case 3:
-        // CORRIGIDO: aba de Álbuns com agrupamento real
-        return AlbumsTab(tracks: tracks, onTrackTap: onTrackTap);
+        return AlbumsTab(
+          tracks: config.applySortToTracks(tracks, config.sortAlbums),
+          onTrackTap: onTrackTap,
+        );
       default:
         return MusicsTab(tracks: tracks, onTrackTap: onTrackTap);
+    }
+  }
+
+  SortOption _currentSort(Configuration config) => switch (_activeMenu) {
+    0 => config.sortMusics,
+    1 => config.sortPlaylists,
+    2 => config.sortArtists,
+    3 => config.sortAlbums,
+    _ => config.sortMusics,
+  };
+
+  List<SortOption> _currentOptions() => switch (_activeMenu) {
+    0 => _sortOptionsMusics,
+    1 => _sortOptionsPlaylists,
+    2 => _sortOptionsArtists,
+    3 => _sortOptionsAlbums,
+    _ => _sortOptionsMusics,
+  };
+
+  void _onSortSelected(SortOption option, Configuration config) {
+    switch (_activeMenu) {
+      case 0:
+        config.setSortMusics(option);
+      case 1:
+        config.setSortPlaylists(option);
+      case 2:
+        config.setSortArtists(option);
+      case 3:
+        config.setSortAlbums(option);
     }
   }
 
@@ -87,19 +151,34 @@ class _TabsComponentState extends State<TabsComponent>
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 10.0),
-                      child: Text(
-                        _tabTitles[_activeMenu],
-                        style: TextStyle(
-                          color: colorScheme.onSurfaceVariant,
-                          fontSize: 13.0,
-                          fontWeight: FontWeight.w500,
-                        ),
+                      padding: const EdgeInsets.symmetric(vertical: 4.0),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              _tabTitles[_activeMenu],
+                              style: TextStyle(
+                                color: colorScheme.onSurfaceVariant,
+                                fontSize: 13.0,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          ),
+                          SortButton(
+                            current: _currentSort(config),
+                            options: _currentOptions(),
+                            onSelected: (opt) => _onSortSelected(opt, config),
+                          ),
+                        ],
                       ),
                     ),
                     tracks.isNotEmpty
                         ? Expanded(
-                            child: _buildContent(tracks, config.playTrack),
+                            child: _buildContent(
+                              tracks,
+                              config.playTrack,
+                              config,
+                            ),
                           )
                         : Expanded(
                             child: Center(

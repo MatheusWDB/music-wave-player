@@ -1,12 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:music_wave_player/data/playlist_database.dart';
-import 'package:music_wave_player/models/playlist.dart';
 import 'package:music_wave_player/models/configuration.dart';
+import 'package:music_wave_player/models/playlist.dart';
 import 'package:music_wave_player/screens/playlist_detail_screen.dart';
+import 'package:music_wave_player/services/favorites_service.dart';
 import 'package:provider/provider.dart';
 
 class PlaylistsTab extends StatefulWidget {
-  const PlaylistsTab({super.key});
+  final SortOption sortOption;
+
+  const PlaylistsTab({super.key, required this.sortOption});
 
   @override
   State<PlaylistsTab> createState() => _PlaylistsTabState();
@@ -22,10 +25,31 @@ class _PlaylistsTabState extends State<PlaylistsTab> {
     _load();
   }
 
+  @override
+  void didUpdateWidget(PlaylistsTab oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.sortOption != widget.sortOption) setState(() {});
+  }
+
   Future<void> _load() async {
     setState(() => _loading = true);
     _playlists = await PlaylistDatabase.instance.readAllPlaylists();
     if (mounted) setState(() => _loading = false);
+  }
+
+  List<Playlist> _sorted() {
+    final list = List<Playlist>.of(_playlists);
+    switch (widget.sortOption) {
+      case SortOption.titleDesc:
+        list.sort(
+          (a, b) => b.name.toLowerCase().compareTo(a.name.toLowerCase()),
+        );
+      default:
+        list.sort(
+          (a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()),
+        );
+    }
+    return list;
   }
 
   Future<void> _createPlaylist() async {
@@ -55,7 +79,6 @@ class _PlaylistsTabState extends State<PlaylistsTab> {
     final playlist = await PlaylistDatabase.instance.createPlaylist(name);
     await _load();
     if (!mounted) return;
-    // Abre a tela de detalhe para o usuário já adicionar músicas
     await Navigator.push(
       context,
       MaterialPageRoute(
@@ -97,6 +120,8 @@ class _PlaylistsTabState extends State<PlaylistsTab> {
 
     if (_loading) return const Center(child: CircularProgressIndicator());
 
+    final sorted = _sorted();
+
     return Column(
       children: [
         const SizedBox(height: 8),
@@ -115,7 +140,7 @@ class _PlaylistsTabState extends State<PlaylistsTab> {
           ),
         ),
         const SizedBox(height: 12),
-        if (_playlists.isEmpty)
+        if (sorted.isEmpty)
           Expanded(
             child: Center(
               child: Text(
@@ -128,10 +153,12 @@ class _PlaylistsTabState extends State<PlaylistsTab> {
         else
           Expanded(
             child: ListView.separated(
-              itemCount: _playlists.length,
+              itemCount: sorted.length,
               separatorBuilder: (_, __) => const SizedBox(height: 8),
               itemBuilder: (context, index) {
-                final playlist = _playlists[index];
+                final playlist = sorted[index];
+                final isFavorites =
+                    playlist.name == FavoritesService.favoritesName;
                 return Card(
                   child: ListTile(
                     leading: Container(
@@ -142,8 +169,12 @@ class _PlaylistsTabState extends State<PlaylistsTab> {
                         borderRadius: BorderRadius.circular(8),
                       ),
                       child: Icon(
-                        Icons.library_music_outlined,
-                        color: colorScheme.onPrimaryContainer,
+                        isFavorites
+                            ? Icons.favorite
+                            : Icons.library_music_outlined,
+                        color: isFavorites
+                            ? colorScheme.error
+                            : colorScheme.onPrimaryContainer,
                       ),
                     ),
                     title: Text(
@@ -174,16 +205,17 @@ class _PlaylistsTabState extends State<PlaylistsTab> {
                             ],
                           ),
                         ),
-                        const PopupMenuItem(
-                          value: 'delete',
-                          child: Row(
-                            children: [
-                              Icon(Icons.delete_outline),
-                              SizedBox(width: 12),
-                              Text('Excluir'),
-                            ],
+                        if (!isFavorites)
+                          const PopupMenuItem(
+                            value: 'delete',
+                            child: Row(
+                              children: [
+                                Icon(Icons.delete_outline),
+                                SizedBox(width: 12),
+                                Text('Excluir'),
+                              ],
+                            ),
                           ),
-                        ),
                       ],
                     ),
                     onTap: () async {

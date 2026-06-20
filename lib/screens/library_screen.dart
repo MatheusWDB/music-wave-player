@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:music_wave_player/components/library_components/mini_player_component.dart';
 import 'package:music_wave_player/components/library_components/tabs_component.dart';
+import 'package:music_wave_player/screens/recently_played_screen.dart';
 import 'package:music_wave_player/screens/root_directory_config_screen.dart';
 import 'package:music_wave_player/screens/search_screen.dart';
 
@@ -32,6 +33,15 @@ class LibraryScreen extends StatelessWidget {
                         color: colorScheme.onSurface,
                       ),
                     ),
+                  ),
+                  IconButton(
+                    onPressed: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => const RecentlyPlayedScreen(),
+                      ),
+                    ),
+                    icon: Icon(Icons.history, color: colorScheme.onSurface),
                   ),
                   IconButton(
                     onPressed: () => Navigator.push(

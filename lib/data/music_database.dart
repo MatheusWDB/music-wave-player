@@ -16,6 +16,7 @@ class MusicDatabase {
   static const String columnAlbum = 'album';
   static const String columnIsEdited = 'is_edited';
   static const String columnCoverPath = 'cover_path';
+  static const String columnDurationMs = 'duration_ms';
 
   Future<Database> get database async {
     if (_database != null) return _database!;
@@ -28,7 +29,7 @@ class MusicDatabase {
     final path = join(dbPath, filePath);
     return await openDatabase(
       path,
-      version: 3,
+      version: 4,
       onCreate: _createDB,
       onUpgrade: _upgradeDB,
     );
@@ -43,7 +44,8 @@ class MusicDatabase {
         $columnArtist    TEXT NOT NULL,
         $columnAlbum     TEXT NOT NULL,
         $columnIsEdited  INTEGER NOT NULL DEFAULT 0,
-        $columnCoverPath TEXT
+        $columnCoverPath TEXT,
+        $columnDurationMs INTEGER NOT NULL DEFAULT 0
       )
     ''');
   }
@@ -57,6 +59,11 @@ class MusicDatabase {
     if (oldVersion < 3) {
       await db.execute(
         'ALTER TABLE $tableTracks ADD COLUMN $columnCoverPath TEXT',
+      );
+    }
+    if (oldVersion < 4) {
+      await db.execute(
+        'ALTER TABLE $tableTracks ADD COLUMN $columnDurationMs INTEGER NOT NULL DEFAULT 0',
       );
     }
   }
@@ -98,10 +105,9 @@ class MusicDatabase {
     final db = await instance.database;
     final result = await db.query(tableTracks);
     final tracks = result.map((m) => MusicTrack.fromMap(m)).toList();
-    tracks.sort((a, b) => naturalCompare(
-          a.title.toLowerCase(),
-          b.title.toLowerCase(),
-        ));
+    tracks.sort(
+      (a, b) => naturalCompare(a.title.toLowerCase(), b.title.toLowerCase()),
+    );
     return tracks;
   }
 
@@ -146,8 +152,9 @@ class MusicDatabase {
       final pb = partsB[i];
       final na = int.tryParse(pa);
       final nb = int.tryParse(pb);
-      final int cmp =
-          (na != null && nb != null) ? na.compareTo(nb) : pa.compareTo(pb);
+      final int cmp = (na != null && nb != null)
+          ? na.compareTo(nb)
+          : pa.compareTo(pb);
       if (cmp != 0) return cmp;
     }
     return partsA.length.compareTo(partsB.length);

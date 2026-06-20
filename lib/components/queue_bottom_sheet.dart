@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:music_wave_player/components/cover_art_widget.dart';
+import 'package:music_wave_player/data/playlist_database.dart';
 import 'package:music_wave_player/models/configuration.dart';
 import 'package:music_wave_player/models/music_track.dart';
 import 'package:provider/provider.dart';
@@ -27,6 +28,65 @@ class _QueueBottomSheetState extends State<QueueBottomSheet> {
   void dispose() {
     _scrollController.dispose();
     super.dispose();
+  }
+
+  Future<void> _saveQueueAsPlaylist(
+    BuildContext context,
+    Configuration config,
+  ) async {
+    final controller = TextEditingController();
+    final name = await showDialog<String>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Salvar fila como playlist'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          decoration: const InputDecoration(labelText: 'Nome da playlist'),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, controller.text.trim()),
+            child: const Text('Salvar'),
+          ),
+        ],
+      ),
+    );
+    if (name == null || name.isEmpty) return;
+
+    final resolvedName = await _resolvePlaylistName(name);
+    final playlist = await PlaylistDatabase.instance.createPlaylist(
+      resolvedName,
+    );
+    await PlaylistDatabase.instance.addTracks(
+      playlist.id!,
+      config.playbackQueue.toList(),
+    );
+
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Playlist "$resolvedName" criada!'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  }
+
+  /// Gera um nome único: se "Nome" já existe, tenta "Nome (1)", "Nome (2)", etc.
+  Future<String> _resolvePlaylistName(String base) async {
+    final existing = await PlaylistDatabase.instance.readAllPlaylists();
+    final names = existing.map((p) => p.name).toSet();
+    if (!names.contains(base)) return base;
+    int counter = 1;
+    while (names.contains('$base ($counter)')) {
+      counter++;
+    }
+    return '$base ($counter)';
   }
 
   Future<void> _confirmClearQueue(
@@ -118,6 +178,12 @@ class _QueueBottomSheetState extends State<QueueBottomSheet> {
                     ),
                   ),
                 ),
+                if (nextQueue.isNotEmpty)
+                  IconButton(
+                    icon: Icon(Icons.playlist_add, color: colorScheme.primary),
+                    tooltip: 'Salvar fila como playlist',
+                    onPressed: () => _saveQueueAsPlaylist(context, config),
+                  ),
                 if (nextQueue.isNotEmpty)
                   IconButton(
                     icon: Icon(Icons.playlist_remove, color: colorScheme.error),

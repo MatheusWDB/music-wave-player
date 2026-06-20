@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:music_wave_player/components/cover_art_widget.dart';
 import 'package:music_wave_player/components/edit_track_bottom_sheet.dart';
+import 'package:music_wave_player/components/favorite_button.dart';
 import 'package:music_wave_player/data/playlist_database.dart';
 import 'package:music_wave_player/models/configuration.dart';
 import 'package:music_wave_player/models/music_track.dart';
@@ -10,7 +11,7 @@ import 'package:provider/provider.dart';
 
 class MusicsTab extends StatefulWidget {
   final List<MusicTrack> tracks;
-  final Function(int) onTrackTap;
+  final Future<void> Function(int) onTrackTap;
 
   const MusicsTab({super.key, required this.tracks, required this.onTrackTap});
 
@@ -164,6 +165,7 @@ class _MusicsTabState extends State<MusicsTab> {
                           ],
                         ),
                       ),
+                      if (!_isSelecting) FavoriteButton(trackId: track.id!),
                       if (!_isSelecting)
                         PopupMenuButton<String>(
                           icon: const Icon(Icons.more_vert),

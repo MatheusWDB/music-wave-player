@@ -15,6 +15,16 @@ class AlbumDetailScreen extends StatelessWidget {
     required this.tracks,
   });
 
+  String _formatDuration(int totalMs) {
+    final d = Duration(milliseconds: totalMs);
+    final h = d.inHours;
+    final m = d.inMinutes.remainder(60);
+    final s = d.inSeconds.remainder(60);
+    if (h > 0) return '${h}h ${m.toString().padLeft(2, '0')}min';
+    if (m > 0) return '${m}min ${s.toString().padLeft(2, '0')}s';
+    return '${s}s';
+  }
+
   void _showQueueSnack(BuildContext context, String message) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
@@ -114,7 +124,7 @@ class AlbumDetailScreen extends StatelessWidget {
                       ),
                       const SizedBox(height: 4),
                       Text(
-                        '${tracks.length} música${tracks.length == 1 ? '' : 's'}',
+                        '${tracks.length} música${tracks.length == 1 ? '' : 's'} · ${_formatDuration(tracks.fold(0, (sum, t) => sum + t.durationMs))}',
                         style: TextStyle(color: colorScheme.onSurfaceVariant),
                       ),
                     ],

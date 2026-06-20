@@ -4,7 +4,7 @@ import 'package:music_wave_player/screens/artist_detail_screen.dart';
 
 class ArtistsTab extends StatelessWidget {
   final List<MusicTrack> tracks;
-  final Function(int) onTrackTap;
+  final Future<void> Function(int) onTrackTap;
 
   const ArtistsTab({super.key, required this.tracks, required this.onTrackTap});
 

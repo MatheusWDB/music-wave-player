@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:music_wave_player/components/cover_art_widget.dart';
+import 'package:music_wave_player/components/favorite_button.dart';
 import 'package:music_wave_player/models/configuration.dart';
 import 'package:music_wave_player/models/music_track.dart';
 import 'package:music_wave_player/screens/full_player_screen.dart';
@@ -72,6 +73,7 @@ class MiniPlayerComponent extends StatelessWidget {
                 ],
               ),
             ),
+            FavoriteButton(trackId: currentTrack.id!, iconSize: 22),
             IconButton(
               onPressed: config.playPreviousTrack,
               icon: Icon(Icons.skip_previous, color: colorScheme.primary),

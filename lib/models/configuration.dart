@@ -5,11 +5,14 @@ import 'package:audio_service/audio_service.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:just_audio/just_audio.dart';
 import 'package:music_wave_player/data/music_database.dart';
 import 'package:music_wave_player/models/music_track.dart';
 import 'package:music_wave_player/models/playlist.dart';
 import 'package:music_wave_player/services/cover_art_service.dart';
+import 'package:music_wave_player/services/favorites_service.dart';
 import 'package:music_wave_player/services/ffmpeg_service.dart';
+import 'package:music_wave_player/services/recently_played_service.dart';
 import 'package:music_wave_player/services/saf_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -17,8 +20,34 @@ const String _kRootDirectoryKey = 'rootDirectoryPath';
 const String _kLastScanDateKey = 'lastScanDate';
 const String _kLastPlayedMusicIdKey = 'lastPlayedMusicId';
 const String _kLastSeekPositionMsKey = 'lastSeekPositionMs';
+const String _kSortMusicsKey = 'sort_musics';
+const String _kSortPlaylistsKey = 'sort_playlists';
+const String _kSortAlbumsKey = 'sort_albums';
+const String _kSortArtistsKey = 'sort_artists';
 
 enum IndexingStatus { idle, scanning, complete, error }
+
+/// Opções de ordenação disponíveis por aba.
+enum SortOption { titleAsc, titleDesc, artistAsc, artistDesc, random }
+
+extension SortOptionLabel on SortOption {
+  String get label => switch (this) {
+    SortOption.titleAsc => 'Título (A→Z)',
+    SortOption.titleDesc => 'Título (Z→A)',
+    SortOption.artistAsc => 'Artista (A→Z)',
+    SortOption.artistDesc => 'Artista (Z→A)',
+    SortOption.random => 'Aleatório',
+  };
+
+  String get key => name;
+
+  static SortOption fromKey(String key, SortOption fallback) {
+    return SortOption.values.firstWhere(
+      (e) => e.name == key,
+      orElse: () => fallback,
+    );
+  }
+}
 
 Future<List<String>> _scanDirectoryForPaths(String rootPath) async {
   final paths = <String>[];
@@ -237,13 +266,19 @@ class Configuration with ChangeNotifier, DiagnosticableTreeMixin {
   String _repeatMode = 'Off';
   bool _isPlaying = false;
   List<int> _playbackQueue = [];
-  // Guarda a ordem original da fila para restaurar ao desativar shuffle.
   List<int> _originalQueue = [];
   int _currentQueueIndex = -1;
   int _currentPositionMs = 0;
   int _trackDurationMs = 0;
   AudioHandler? _audioHandler;
   bool _isLoading = true;
+  List<int> _recentlyPlayedIds = [];
+
+  // Ordenação por aba
+  SortOption _sortMusics = SortOption.titleAsc;
+  SortOption _sortPlaylists = SortOption.titleAsc;
+  SortOption _sortAlbums = SortOption.titleAsc;
+  SortOption _sortArtists = SortOption.titleAsc;
 
   static const _safChannel = MethodChannel(
     'br.com.hematsu.music_wave_player/saf',
@@ -252,6 +287,10 @@ class Configuration with ChangeNotifier, DiagnosticableTreeMixin {
   Configuration.empty();
 
   bool get isLoading => _isLoading;
+  SortOption get sortMusics => _sortMusics;
+  SortOption get sortPlaylists => _sortPlaylists;
+  SortOption get sortAlbums => _sortAlbums;
+  SortOption get sortArtists => _sortArtists;
 
   Future<void> loadFromStorageAsync() async {
     try {
@@ -263,6 +302,24 @@ class Configuration with ChangeNotifier, DiagnosticableTreeMixin {
           : null;
       _lastPlayedMusicId = prefs.getInt(_kLastPlayedMusicIdKey);
       _lastSeekPositionMs = prefs.getInt(_kLastSeekPositionMsKey) ?? 0;
+      _recentlyPlayedIds = await RecentlyPlayedService.load();
+      await FavoritesService.ensurePlaylist();
+      _sortMusics = SortOptionLabel.fromKey(
+        prefs.getString(_kSortMusicsKey) ?? '',
+        SortOption.titleAsc,
+      );
+      _sortPlaylists = SortOptionLabel.fromKey(
+        prefs.getString(_kSortPlaylistsKey) ?? '',
+        SortOption.titleAsc,
+      );
+      _sortAlbums = SortOptionLabel.fromKey(
+        prefs.getString(_kSortAlbumsKey) ?? '',
+        SortOption.titleAsc,
+      );
+      _sortArtists = SortOptionLabel.fromKey(
+        prefs.getString(_kSortArtistsKey) ?? '',
+        SortOption.titleAsc,
+      );
       await loadIndexedTracks();
       if (_lastPlayedMusicId != null && currentTrackPath != null) {
         await _audioHandler?.customAction('loadTrack', {
@@ -292,6 +349,17 @@ class Configuration with ChangeNotifier, DiagnosticableTreeMixin {
   String? get currentTrackPath => currentTrack?.path;
   AudioHandler? get audioHandler => _audioHandler;
 
+  List<MusicTrack> get recentlyPlayedTracks => _recentlyPlayedIds
+      .map((id) {
+        try {
+          return _indexedTracks.firstWhere((t) => t.id == id);
+        } catch (_) {
+          return null;
+        }
+      })
+      .whereType<MusicTrack>()
+      .toList();
+
   MusicTrack? get currentTrack {
     if (_lastPlayedMusicId == null) return null;
     try {
@@ -311,6 +379,77 @@ class Configuration with ChangeNotifier, DiagnosticableTreeMixin {
 
   set audioHandler(AudioHandler handler) => _audioHandler = handler;
   set lastSeekPositionMs(int ms) => _lastSeekPositionMs = ms;
+
+  // ── Ordenação ─────────────────────────────────────────────────────────────
+
+  Future<void> setSortMusics(SortOption option) async {
+    _sortMusics = option;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_kSortMusicsKey, option.key);
+  }
+
+  Future<void> setSortPlaylists(SortOption option) async {
+    _sortPlaylists = option;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_kSortPlaylistsKey, option.key);
+  }
+
+  Future<void> setSortAlbums(SortOption option) async {
+    _sortAlbums = option;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_kSortAlbumsKey, option.key);
+  }
+
+  Future<void> setSortArtists(SortOption option) async {
+    _sortArtists = option;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_kSortArtistsKey, option.key);
+  }
+
+  /// Aplica [option] a uma lista de faixas, retornando nova lista ordenada.
+  List<MusicTrack> applySortToTracks(
+    List<MusicTrack> tracks,
+    SortOption option,
+  ) {
+    final list = List<MusicTrack>.of(tracks);
+    switch (option) {
+      case SortOption.titleAsc:
+        list.sort(
+          (a, b) => MusicDatabase.naturalCompare(
+            a.title.toLowerCase(),
+            b.title.toLowerCase(),
+          ),
+        );
+      case SortOption.titleDesc:
+        list.sort(
+          (a, b) => MusicDatabase.naturalCompare(
+            b.title.toLowerCase(),
+            a.title.toLowerCase(),
+          ),
+        );
+      case SortOption.artistAsc:
+        list.sort(
+          (a, b) => MusicDatabase.naturalCompare(
+            a.artist.toLowerCase(),
+            b.artist.toLowerCase(),
+          ),
+        );
+      case SortOption.artistDesc:
+        list.sort(
+          (a, b) => MusicDatabase.naturalCompare(
+            b.artist.toLowerCase(),
+            a.artist.toLowerCase(),
+          ),
+        );
+      case SortOption.random:
+        list.shuffle();
+    }
+    return list;
+  }
 
   void syncPlayingState(bool playing) {
     if (_isPlaying != playing) {
@@ -340,7 +479,6 @@ class Configuration with ChangeNotifier, DiagnosticableTreeMixin {
     final id = _playbackQueue.removeAt(oldIndex);
     _playbackQueue.insert(newIndex, id);
     _currentQueueIndex = _playbackQueue.indexOf(_lastPlayedMusicId!);
-    // Reordenação manual invalida a ordem original.
     _originalQueue = List.of(_playbackQueue);
     notifyListeners();
   }
@@ -371,7 +509,6 @@ class Configuration with ChangeNotifier, DiagnosticableTreeMixin {
     playTrack(_playbackQueue[index], regenerateQueue: false);
   }
 
-  /// Remove todas as músicas da fila exceto a que está tocando atualmente.
   void clearQueue() {
     if (_lastPlayedMusicId == null) return;
     _playbackQueue = [_lastPlayedMusicId!];
@@ -380,7 +517,6 @@ class Configuration with ChangeNotifier, DiagnosticableTreeMixin {
     notifyListeners();
   }
 
-  /// Insere [ids] imediatamente após a música atual na fila.
   void insertAfterCurrent(List<int> ids) {
     if (ids.isEmpty) return;
     final insertAt = _currentQueueIndex + 1;
@@ -391,11 +527,16 @@ class Configuration with ChangeNotifier, DiagnosticableTreeMixin {
     notifyListeners();
   }
 
-  /// Adiciona [ids] ao final da fila atual.
   void addToEndOfQueue(List<int> ids) {
     if (ids.isEmpty) return;
     _playbackQueue.addAll(ids);
     _originalQueue.addAll(ids);
+    notifyListeners();
+  }
+
+  Future<void> clearRecentlyPlayed() async {
+    await RecentlyPlayedService.clear();
+    _recentlyPlayedIds = [];
     notifyListeners();
   }
 
@@ -407,8 +548,6 @@ class Configuration with ChangeNotifier, DiagnosticableTreeMixin {
 
   // ── Shuffle ───────────────────────────────────────────────────────────────
 
-  /// Ativa: embaralha a fila atual mantendo a música corrente no seu índice.
-  /// Desativa: restaura a ordem original, reposicionando a atual corretamente.
   void toggleShuffle() {
     _isShuffleActive = !_isShuffleActive;
     if (_isShuffleActive) {
@@ -419,25 +558,16 @@ class Configuration with ChangeNotifier, DiagnosticableTreeMixin {
     notifyListeners();
   }
 
-  /// Embaralha a fila mantendo a música atual no lugar:
-  /// - Músicas antes dela → embaralhadas entre si, permanecem antes
-  /// - Música atual → índice inalterado
-  /// - Músicas depois dela → embaralhadas entre si, permanecem depois
   void _applyShuffleToCurrentQueue() {
     if (_playbackQueue.length <= 1) return;
-
     _originalQueue = List.of(_playbackQueue);
-
     final rng = Random();
     final before = _playbackQueue.sublist(0, _currentQueueIndex)..shuffle(rng);
     final current = _playbackQueue[_currentQueueIndex];
     final after = _playbackQueue.sublist(_currentQueueIndex + 1)..shuffle(rng);
-
     _playbackQueue = [...before, current, ...after];
-    // _currentQueueIndex não muda pois a atual permanece no mesmo índice.
   }
 
-  /// Restaura a ordem original, mantendo a música atual no lugar certo.
   void _restoreOriginalQueue() {
     if (_originalQueue.isEmpty) return;
     _playbackQueue = List.of(_originalQueue);
@@ -448,12 +578,9 @@ class Configuration with ChangeNotifier, DiagnosticableTreeMixin {
 
   // ── Fila ─────────────────────────────────────────────────────────────────
 
-  /// Define uma nova fila a partir de uma lista ordenada de IDs.
-  /// Se shuffle estiver ativo, embaralha imediatamente (exceto o primeiro).
   void _setQueue(List<int> orderedIds) {
     _originalQueue = List.of(orderedIds);
     _currentQueueIndex = 0;
-
     if (_isShuffleActive && orderedIds.length > 1) {
       final first = orderedIds.first;
       final rest = orderedIds.sublist(1)..shuffle();
@@ -467,14 +594,11 @@ class Configuration with ChangeNotifier, DiagnosticableTreeMixin {
 
   void playPlaylist(Playlist playlist) {
     if (playlist.trackIds.isEmpty) return;
-
     final validIds = playlist.trackIds
         .where((id) => _indexedTracks.any((t) => t.id == id))
         .toList();
     if (validIds.isEmpty) return;
-
     _setQueue(validIds);
-
     _lastPlayedMusicId = _playbackQueue.first;
     _saveLastPlayedMusicId(_lastPlayedMusicId!);
     _lastSeekPositionMs = 0;
@@ -488,9 +612,7 @@ class Configuration with ChangeNotifier, DiagnosticableTreeMixin {
 
   void playTracks(List<MusicTrack> tracks) {
     if (tracks.isEmpty) return;
-
     _setQueue(tracks.map((t) => t.id!).toList());
-
     _lastPlayedMusicId = _playbackQueue.first;
     _saveLastPlayedMusicId(_lastPlayedMusicId!);
     _lastSeekPositionMs = 0;
@@ -613,8 +735,6 @@ class Configuration with ChangeNotifier, DiagnosticableTreeMixin {
     await p.setString(_kRootDirectoryKey, path);
   }
 
-  /// Gera a fila a partir de todas as músicas indexadas.
-  /// Chamado apenas ao carregar o app ou após reindexação.
   void _regenerateQueue() {
     final ids = _indexedTracks.map((t) => t.id!).toList();
     _originalQueue = List.of(ids);
@@ -664,6 +784,19 @@ class Configuration with ChangeNotifier, DiagnosticableTreeMixin {
         _indexedFileCount = allTracks.length;
         notifyListeners();
       }
+
+      // Lê durações no thread principal (just_audio requer BinaryMessenger)
+      final player = AudioPlayer();
+      for (int i = 0; i < allTracks.length; i++) {
+        try {
+          final duration = await player.setFilePath(allTracks[i].path);
+          allTracks[i] = allTracks[i].copyWith(
+            durationMs: duration?.inMilliseconds ?? 0,
+          );
+        } catch (_) {}
+      }
+      await player.dispose();
+
       _indexedTracks = await MusicDatabase.instance.insertTracks(allTracks);
       _indexedFileCount = _indexedTracks.length;
       _indexingStatus = IndexingStatus.complete;
@@ -679,10 +812,16 @@ class Configuration with ChangeNotifier, DiagnosticableTreeMixin {
     }
   }
 
-  void playTrack(int musicId, {bool regenerateQueue = true}) {
+  Future<void> playTrack(int musicId, {bool regenerateQueue = true}) async {
     final idx = _indexedTracks.indexWhere((t) => t.id == musicId);
     if (idx == -1) return;
     if (_lastPlayedMusicId != musicId) {
+      if (_lastPlayedMusicId != null) {
+        _recentlyPlayedIds = await RecentlyPlayedService.push(
+          _lastPlayedMusicId!,
+          _recentlyPlayedIds,
+        );
+      }
       if (regenerateQueue) _regenerateQueue();
       _currentQueueIndex = _playbackQueue.indexOf(musicId);
       _lastPlayedMusicId = musicId;
