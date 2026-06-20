@@ -1,11 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:music_wave_player/components/cover_art_widget.dart';
+import 'package:music_wave_player/components/rating_bottom_sheet.dart';
 import 'package:music_wave_player/models/configuration.dart';
 import 'package:music_wave_player/models/music_track.dart';
 import 'package:music_wave_player/screens/full_player_screen.dart';
 import 'package:provider/provider.dart';
 
-class AlbumDetailScreen extends StatelessWidget {
+class AlbumDetailScreen extends StatefulWidget {
   final String album;
   final List<MusicTrack> tracks;
 
@@ -14,6 +15,19 @@ class AlbumDetailScreen extends StatelessWidget {
     required this.album,
     required this.tracks,
   });
+
+  @override
+  State<AlbumDetailScreen> createState() => _AlbumDetailScreenState();
+}
+
+class _AlbumDetailScreenState extends State<AlbumDetailScreen> {
+  late List<MusicTrack> _tracks;
+
+  @override
+  void initState() {
+    super.initState();
+    _tracks = List.of(widget.tracks);
+  }
 
   String _formatDuration(int totalMs) {
     final d = Duration(milliseconds: totalMs);
@@ -25,7 +39,7 @@ class AlbumDetailScreen extends StatelessWidget {
     return '${s}s';
   }
 
-  void _showQueueSnack(BuildContext context, String message) {
+  void _showSnack(String message) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(message),
@@ -35,32 +49,35 @@ class AlbumDetailScreen extends StatelessWidget {
     );
   }
 
+  Future<void> _hideTrack(MusicTrack track) async {
+    await context.read<Configuration>().hideTracks([track.id!]);
+    setState(() => _tracks.removeWhere((t) => t.id == track.id));
+    _showSnack('Música ocultada.');
+  }
+
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     final config = context.read<Configuration>();
-    final ids = tracks.map((t) => t.id!).toList();
+    final ids = _tracks.map((t) => t.id!).toList();
 
-    final coverPath = tracks
-        .firstWhere((t) => t.coverPath != null, orElse: () => tracks.first)
+    final coverPath = _tracks
+        .firstWhere((t) => t.coverPath != null, orElse: () => _tracks.first)
         .coverPath;
-    final artist = tracks.first.artist;
+    final artist = widget.tracks.first.artist;
 
     return Scaffold(
       appBar: AppBar(
-        title: Text(album),
+        title: Text(widget.album),
         actions: [
           PopupMenuButton<String>(
             onSelected: (value) {
               if (value == 'insert_next') {
                 config.insertAfterCurrent(ids);
-                _showQueueSnack(context, 'Músicas adicionadas após a atual');
+                _showSnack('Músicas adicionadas após a atual');
               } else if (value == 'add_end') {
                 config.addToEndOfQueue(ids);
-                _showQueueSnack(
-                  context,
-                  'Músicas adicionadas ao final da fila',
-                );
+                _showSnack('Músicas adicionadas ao final da fila');
               }
             },
             itemBuilder: (_) => const [
@@ -109,7 +126,7 @@ class AlbumDetailScreen extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        album,
+                        widget.album,
                         style: const TextStyle(
                           fontSize: 18,
                           fontWeight: FontWeight.bold,
@@ -124,59 +141,128 @@ class AlbumDetailScreen extends StatelessWidget {
                       ),
                       const SizedBox(height: 4),
                       Text(
-                        '${tracks.length} música${tracks.length == 1 ? '' : 's'} · ${_formatDuration(tracks.fold(0, (sum, t) => sum + t.durationMs))}',
+                        '${_tracks.length} música${_tracks.length == 1 ? '' : 's'} · ${_formatDuration(_tracks.fold(0, (sum, t) => sum + t.durationMs))}',
                         style: TextStyle(color: colorScheme.onSurfaceVariant),
                       ),
                     ],
                   ),
                 ),
-                FilledButton.icon(
-                  onPressed: () {
-                    config.playTracks(tracks);
-                    Navigator.pop(context);
-                  },
-                  icon: const Icon(Icons.play_arrow),
-                  label: const Text('Tocar'),
-                ),
+                if (_tracks.isNotEmpty)
+                  FilledButton.icon(
+                    onPressed: () {
+                      config.playTracks(_tracks);
+                      Navigator.pop(context);
+                    },
+                    icon: const Icon(Icons.play_arrow),
+                    label: const Text('Tocar'),
+                  ),
               ],
             ),
           ),
           const Divider(height: 1),
           // Lista de músicas
           Expanded(
-            child: ListView.builder(
-              itemCount: tracks.length,
-              itemBuilder: (context, index) {
-                final track = tracks[index];
-                return ListTile(
-                  leading: CoverArtWidget(
-                    coverPath: track.coverPath,
-                    size: 44,
-                    borderRadius: BorderRadius.circular(6),
+            child: _tracks.isEmpty
+                ? Center(
+                    child: Text(
+                      'Nenhuma música visível.',
+                      style: TextStyle(color: colorScheme.onSurfaceVariant),
+                    ),
+                  )
+                : ListView.builder(
+                    itemCount: _tracks.length,
+                    itemBuilder: (context, index) {
+                      final track = _tracks[index];
+                      return ListTile(
+                        leading: CoverArtWidget(
+                          coverPath: track.coverPath,
+                          size: 44,
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        title: Text(
+                          track.title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        subtitle: Text(
+                          track.artist,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        trailing: PopupMenuButton<String>(
+                          icon: const Icon(Icons.more_vert),
+                          onSelected: (value) async {
+                            if (value == 'insert_next') {
+                              config.insertAfterCurrent([track.id!]);
+                              _showSnack('Música adicionada após a atual');
+                            } else if (value == 'add_end') {
+                              config.addToEndOfQueue([track.id!]);
+                              _showSnack('Música adicionada ao final da fila');
+                            } else if (value == 'rate') {
+                              await RatingBottomSheet.show(
+                                context,
+                                track: track,
+                              );
+                            } else if (value == 'hide') {
+                              await _hideTrack(track);
+                            }
+                          },
+                          itemBuilder: (_) => const [
+                            PopupMenuItem(
+                              value: 'insert_next',
+                              child: Row(
+                                children: [
+                                  Icon(Icons.queue_play_next_outlined),
+                                  SizedBox(width: 12),
+                                  Text('Tocar a seguir'),
+                                ],
+                              ),
+                            ),
+                            PopupMenuItem(
+                              value: 'add_end',
+                              child: Row(
+                                children: [
+                                  Icon(Icons.add_to_queue_outlined),
+                                  SizedBox(width: 12),
+                                  Text('Adicionar à fila'),
+                                ],
+                              ),
+                            ),
+                            PopupMenuItem(
+                              value: 'rate',
+                              child: Row(
+                                children: [
+                                  Icon(Icons.star_outline),
+                                  SizedBox(width: 12),
+                                  Text('Avaliar'),
+                                ],
+                              ),
+                            ),
+                            PopupMenuItem(
+                              value: 'hide',
+                              child: Row(
+                                children: [
+                                  Icon(Icons.visibility_off_outlined),
+                                  SizedBox(width: 12),
+                                  Text('Ocultar'),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                        onTap: () {
+                          config.playTrack(track.id!);
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) =>
+                                  FullPlayerScreen(initialTrackId: track.id),
+                            ),
+                          );
+                        },
+                      );
+                    },
                   ),
-                  title: Text(
-                    track.title,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  subtitle: Text(
-                    track.artist,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  onTap: () {
-                    config.playTrack(track.id!);
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) =>
-                            FullPlayerScreen(initialTrackId: track.id),
-                      ),
-                    );
-                  },
-                );
-              },
-            ),
           ),
         ],
       ),

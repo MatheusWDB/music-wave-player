@@ -2,11 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:music_wave_player/components/cover_art_widget.dart';
 import 'package:music_wave_player/components/edit_track_bottom_sheet.dart';
 import 'package:music_wave_player/components/favorite_button.dart';
+import 'package:music_wave_player/components/rating_bottom_sheet.dart';
 import 'package:music_wave_player/data/playlist_database.dart';
 import 'package:music_wave_player/models/configuration.dart';
 import 'package:music_wave_player/models/music_track.dart';
 import 'package:music_wave_player/models/playlist.dart';
 import 'package:music_wave_player/screens/full_player_screen.dart';
+import 'package:music_wave_player/services/favorites_service.dart';
 import 'package:provider/provider.dart';
 
 class MusicsTab extends StatefulWidget {
@@ -67,6 +69,40 @@ class _MusicsTabState extends State<MusicsTab> {
           content: const Text('Músicas adicionadas à playlist!'),
           behavior: SnackBarBehavior.floating,
           backgroundColor: Theme.of(context).colorScheme.primary,
+        ),
+      );
+    }
+  }
+
+  Future<void> _favoriteSelected() async {
+    final ids = _selected.toList();
+    _clearSelection();
+    final playlistId = await FavoritesService.ensurePlaylist();
+    await PlaylistDatabase.instance.addTracks(playlistId, ids);
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            '${ids.length} música${ids.length == 1 ? '' : 's'} adicionada${ids.length == 1 ? '' : 's'} aos favoritos!',
+          ),
+          behavior: SnackBarBehavior.floating,
+          backgroundColor: Theme.of(context).colorScheme.primary,
+        ),
+      );
+    }
+  }
+
+  Future<void> _hideSelected() async {
+    final ids = _selected.toList();
+    _clearSelection();
+    await context.read<Configuration>().hideTracks(ids);
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            '${ids.length} música${ids.length == 1 ? '' : 's'} ocultada${ids.length == 1 ? '' : 's'}.',
+          ),
+          behavior: SnackBarBehavior.floating,
         ),
       );
     }
@@ -175,6 +211,11 @@ class _MusicsTabState extends State<MusicsTab> {
                                 context,
                                 track: track,
                               );
+                            } else if (value == 'rate') {
+                              await RatingBottomSheet.show(
+                                context,
+                                track: track,
+                              );
                             } else if (value == 'playlist') {
                               setState(() => _selected.add(track.id!));
                               await _addSelectedToPlaylist();
@@ -186,6 +227,16 @@ class _MusicsTabState extends State<MusicsTab> {
                               _showQueueSnack(
                                 'Música adicionada ao final da fila',
                               );
+                            } else if (value == 'hide') {
+                              await config.hideTracks([track.id!]);
+                              if (mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text('Música ocultada.'),
+                                    behavior: SnackBarBehavior.floating,
+                                  ),
+                                );
+                              }
                             }
                           },
                           itemBuilder: (_) => const [
@@ -220,12 +271,32 @@ class _MusicsTabState extends State<MusicsTab> {
                               ),
                             ),
                             PopupMenuItem(
+                              value: 'rate',
+                              child: Row(
+                                children: [
+                                  Icon(Icons.star_outline),
+                                  SizedBox(width: 12),
+                                  Text('Avaliar'),
+                                ],
+                              ),
+                            ),
+                            PopupMenuItem(
                               value: 'playlist',
                               child: Row(
                                 children: [
                                   Icon(Icons.playlist_add_outlined),
                                   SizedBox(width: 12),
                                   Text('Adicionar à playlist'),
+                                ],
+                              ),
+                            ),
+                            PopupMenuItem(
+                              value: 'hide',
+                              child: Row(
+                                children: [
+                                  Icon(Icons.visibility_off_outlined),
+                                  SizedBox(width: 12),
+                                  Text('Ocultar'),
                                 ],
                               ),
                             ),
@@ -269,6 +340,18 @@ class _MusicsTabState extends State<MusicsTab> {
                       '${_selected.length} selecionada${_selected.length == 1 ? '' : 's'}',
                       overflow: TextOverflow.ellipsis,
                     ),
+                  ),
+                  IconButton(
+                    onPressed: _hideSelected,
+                    icon: const Icon(Icons.visibility_off_outlined),
+                    tooltip: 'Ocultar',
+                    color: colorScheme.onSurfaceVariant,
+                  ),
+                  IconButton(
+                    onPressed: _favoriteSelected,
+                    icon: const Icon(Icons.favorite_border),
+                    tooltip: 'Favoritar',
+                    color: colorScheme.error,
                   ),
                   FilledButton.icon(
                     onPressed: _addSelectedToPlaylist,

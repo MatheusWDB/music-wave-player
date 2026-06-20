@@ -27,8 +27,15 @@ const String _kSortArtistsKey = 'sort_artists';
 
 enum IndexingStatus { idle, scanning, complete, error }
 
-/// Opções de ordenação disponíveis por aba.
-enum SortOption { titleAsc, titleDesc, artistAsc, artistDesc, random }
+enum SortOption {
+  titleAsc,
+  titleDesc,
+  artistAsc,
+  artistDesc,
+  random,
+  ratingDesc,
+  ratingAsc,
+}
 
 extension SortOptionLabel on SortOption {
   String get label => switch (this) {
@@ -37,6 +44,8 @@ extension SortOptionLabel on SortOption {
     SortOption.artistAsc => 'Artista (A→Z)',
     SortOption.artistDesc => 'Artista (Z→A)',
     SortOption.random => 'Aleatório',
+    SortOption.ratingDesc => 'Melhor avaliadas',
+    SortOption.ratingAsc => 'Pior avaliadas',
   };
 
   String get key => name;
@@ -274,7 +283,6 @@ class Configuration with ChangeNotifier, DiagnosticableTreeMixin {
   bool _isLoading = true;
   List<int> _recentlyPlayedIds = [];
 
-  // Ordenação por aba
   SortOption _sortMusics = SortOption.titleAsc;
   SortOption _sortPlaylists = SortOption.titleAsc;
   SortOption _sortAlbums = SortOption.titleAsc;
@@ -410,7 +418,6 @@ class Configuration with ChangeNotifier, DiagnosticableTreeMixin {
     await prefs.setString(_kSortArtistsKey, option.key);
   }
 
-  /// Aplica [option] a uma lista de faixas, retornando nova lista ordenada.
   List<MusicTrack> applySortToTracks(
     List<MusicTrack> tracks,
     SortOption option,
@@ -447,8 +454,97 @@ class Configuration with ChangeNotifier, DiagnosticableTreeMixin {
         );
       case SortOption.random:
         list.shuffle();
+      case SortOption.ratingDesc:
+        list.sort((a, b) => b.rating.compareTo(a.rating));
+      case SortOption.ratingAsc:
+        list.sort((a, b) => a.rating.compareTo(b.rating));
     }
     return list;
+  }
+
+  // ── Avaliação ─────────────────────────────────────────────────────────────
+
+  Future<void> setRating(int trackId, double rating) async {
+    await MusicDatabase.instance.updateRating(trackId, rating);
+    final idx = _indexedTracks.indexWhere((t) => t.id == trackId);
+    if (idx != -1) {
+      _indexedTracks[idx] = _indexedTracks[idx].copyWith(rating: rating);
+      notifyListeners();
+    }
+  }
+
+  // ── Ocultar/Reexibir ──────────────────────────────────────────────────────
+
+  Future<void> hideTracks(List<int> ids) async {
+    if (ids.isEmpty) return;
+    await MusicDatabase.instance.setHidden(ids, hidden: true);
+
+    _indexedTracks.removeWhere((t) => ids.contains(t.id));
+
+    for (int i = _playbackQueue.length - 1; i >= 0; i--) {
+      if (ids.contains(_playbackQueue[i])) {
+        removeFromQueue(i);
+      }
+    }
+
+    _originalQueue.removeWhere((id) => ids.contains(id));
+    _regenerateQueue();
+    notifyListeners();
+  }
+
+  Future<void> unhideTracks(List<int> ids) async {
+    if (ids.isEmpty) return;
+    await MusicDatabase.instance.setHidden(ids, hidden: false);
+    await loadIndexedTracks();
+  }
+
+  Future<void> unhideAllTracks() async {
+    await MusicDatabase.instance.unhideAll();
+    await loadIndexedTracks();
+  }
+
+  // ── Shuffle ───────────────────────────────────────────────────────────────
+
+  void toggleShuffle() {
+    _isShuffleActive = !_isShuffleActive;
+    if (_isShuffleActive) {
+      _applyShuffleToCurrentQueue();
+    } else {
+      _restoreOriginalQueue();
+    }
+    notifyListeners();
+  }
+
+  void _applyShuffleToCurrentQueue() {
+    if (_playbackQueue.length <= 1) return;
+    _originalQueue = List.of(_playbackQueue);
+    final rng = Random();
+    final before = _playbackQueue.sublist(0, _currentQueueIndex)..shuffle(rng);
+    final current = _playbackQueue[_currentQueueIndex];
+    final after = _playbackQueue.sublist(_currentQueueIndex + 1)..shuffle(rng);
+    _playbackQueue = [...before, current, ...after];
+  }
+
+  void _restoreOriginalQueue() {
+    if (_originalQueue.isEmpty) return;
+    _playbackQueue = List.of(_originalQueue);
+    if (_lastPlayedMusicId != null) {
+      _currentQueueIndex = _playbackQueue.indexOf(_lastPlayedMusicId!);
+    }
+  }
+
+  // ── Fila ─────────────────────────────────────────────────────────────────
+
+  void _setQueue(List<int> orderedIds) {
+    _originalQueue = List.of(orderedIds);
+    _currentQueueIndex = 0;
+    if (_isShuffleActive && orderedIds.length > 1) {
+      final first = orderedIds.first;
+      final rest = orderedIds.sublist(1)..shuffle();
+      _playbackQueue = [first, ...rest];
+    } else {
+      _playbackQueue = List.of(orderedIds);
+    }
   }
 
   void syncPlayingState(bool playing) {
@@ -546,50 +642,6 @@ class Configuration with ChangeNotifier, DiagnosticableTreeMixin {
     } catch (_) {}
   }
 
-  // ── Shuffle ───────────────────────────────────────────────────────────────
-
-  void toggleShuffle() {
-    _isShuffleActive = !_isShuffleActive;
-    if (_isShuffleActive) {
-      _applyShuffleToCurrentQueue();
-    } else {
-      _restoreOriginalQueue();
-    }
-    notifyListeners();
-  }
-
-  void _applyShuffleToCurrentQueue() {
-    if (_playbackQueue.length <= 1) return;
-    _originalQueue = List.of(_playbackQueue);
-    final rng = Random();
-    final before = _playbackQueue.sublist(0, _currentQueueIndex)..shuffle(rng);
-    final current = _playbackQueue[_currentQueueIndex];
-    final after = _playbackQueue.sublist(_currentQueueIndex + 1)..shuffle(rng);
-    _playbackQueue = [...before, current, ...after];
-  }
-
-  void _restoreOriginalQueue() {
-    if (_originalQueue.isEmpty) return;
-    _playbackQueue = List.of(_originalQueue);
-    if (_lastPlayedMusicId != null) {
-      _currentQueueIndex = _playbackQueue.indexOf(_lastPlayedMusicId!);
-    }
-  }
-
-  // ── Fila ─────────────────────────────────────────────────────────────────
-
-  void _setQueue(List<int> orderedIds) {
-    _originalQueue = List.of(orderedIds);
-    _currentQueueIndex = 0;
-    if (_isShuffleActive && orderedIds.length > 1) {
-      final first = orderedIds.first;
-      final rest = orderedIds.sublist(1)..shuffle();
-      _playbackQueue = [first, ...rest];
-    } else {
-      _playbackQueue = List.of(orderedIds);
-    }
-  }
-
   // ── Playlist ──────────────────────────────────────────────────────────────
 
   void playPlaylist(Playlist playlist) {
@@ -612,7 +664,12 @@ class Configuration with ChangeNotifier, DiagnosticableTreeMixin {
 
   void playTracks(List<MusicTrack> tracks) {
     if (tracks.isEmpty) return;
-    _setQueue(tracks.map((t) => t.id!).toList());
+    final visibleIds = tracks
+        .where((t) => !t.isHidden)
+        .map((t) => t.id!)
+        .toList();
+    if (visibleIds.isEmpty) return;
+    _setQueue(visibleIds);
     _lastPlayedMusicId = _playbackQueue.first;
     _saveLastPlayedMusicId(_lastPlayedMusicId!);
     _lastSeekPositionMs = 0;
@@ -785,7 +842,6 @@ class Configuration with ChangeNotifier, DiagnosticableTreeMixin {
         notifyListeners();
       }
 
-      // Lê durações no thread principal (just_audio requer BinaryMessenger)
       final player = AudioPlayer();
       for (int i = 0; i < allTracks.length; i++) {
         try {

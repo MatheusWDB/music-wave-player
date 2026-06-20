@@ -7,12 +7,10 @@ class MusicTrack {
   final String artist;
   final String album;
   final bool isEdited;
-
-  /// Caminho local da capa extraída e salva no cache do app.
+  final bool isHidden;
   final String? coverPath;
-
-  /// Duração em milissegundos. 0 se ainda não lida.
   final int durationMs;
+  final double rating;
 
   static const List<String> supportedExtensions = [
     '.mp3',
@@ -29,8 +27,10 @@ class MusicTrack {
     required this.artist,
     required this.album,
     this.isEdited = false,
+    this.isHidden = false,
     this.coverPath,
     this.durationMs = 0,
+    this.rating = 0,
   });
 
   MusicTrack copyWith({
@@ -40,9 +40,11 @@ class MusicTrack {
     String? artist,
     String? album,
     bool? isEdited,
+    bool? isHidden,
     String? coverPath,
     bool clearCoverPath = false,
     int? durationMs,
+    double? rating,
   }) {
     return MusicTrack(
       id: id ?? this.id,
@@ -51,8 +53,10 @@ class MusicTrack {
       artist: artist ?? this.artist,
       album: album ?? this.album,
       isEdited: isEdited ?? this.isEdited,
+      isHidden: isHidden ?? this.isHidden,
       coverPath: clearCoverPath ? null : (coverPath ?? this.coverPath),
       durationMs: durationMs ?? this.durationMs,
+      rating: rating ?? this.rating,
     );
   }
 
@@ -67,8 +71,10 @@ class MusicTrack {
     MusicDatabase.columnArtist: artist,
     MusicDatabase.columnAlbum: album,
     MusicDatabase.columnIsEdited: isEdited ? 1 : 0,
+    MusicDatabase.columnIsHidden: isHidden ? 1 : 0,
     MusicDatabase.columnCoverPath: coverPath,
     MusicDatabase.columnDurationMs: durationMs,
+    MusicDatabase.columnRating: rating,
   };
 
   static MusicTrack fromMap(Map<String, Object?> map) => MusicTrack(
@@ -78,13 +84,16 @@ class MusicTrack {
     artist: map[MusicDatabase.columnArtist] as String,
     album: map[MusicDatabase.columnAlbum] as String,
     isEdited: (map[MusicDatabase.columnIsEdited] as int? ?? 0) == 1,
+    isHidden: (map[MusicDatabase.columnIsHidden] as int? ?? 0) == 1,
     coverPath: map[MusicDatabase.columnCoverPath] as String?,
     durationMs: map[MusicDatabase.columnDurationMs] as int? ?? 0,
+    rating: (map[MusicDatabase.columnRating] as num? ?? 0).toDouble(),
   );
 
   @override
   String toString() =>
       'MusicTrack: {id: $id, path: $path, title: $title, '
       'artist: $artist, album: $album, isEdited: $isEdited, '
-      'coverPath: $coverPath, durationMs: $durationMs}';
+      'isHidden: $isHidden, rating: $rating, coverPath: $coverPath, '
+      'durationMs: $durationMs}';
 }

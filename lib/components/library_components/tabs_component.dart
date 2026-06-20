@@ -27,12 +27,13 @@ class _TabsComponentState extends State<TabsComponent>
     'Álbuns',
   ];
 
-  // Opções de ordenação disponíveis por aba
   static const _sortOptionsMusics = [
     SortOption.titleAsc,
     SortOption.titleDesc,
     SortOption.artistAsc,
     SortOption.artistDesc,
+    SortOption.ratingDesc,
+    SortOption.ratingAsc,
     SortOption.random,
   ];
   static const _sortOptionsPlaylists = [

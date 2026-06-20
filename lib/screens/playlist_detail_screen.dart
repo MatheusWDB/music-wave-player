@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:music_wave_player/components/cover_art_widget.dart';
+import 'package:music_wave_player/components/rating_bottom_sheet.dart';
 import 'package:music_wave_player/components/track_selection_bottom_sheet.dart';
 import 'package:music_wave_player/data/playlist_database.dart';
 import 'package:music_wave_player/models/configuration.dart';
 import 'package:music_wave_player/models/music_track.dart';
 import 'package:music_wave_player/models/playlist.dart';
+import 'package:music_wave_player/screens/full_player_screen.dart';
 import 'package:music_wave_player/services/favorites_service.dart';
 import 'package:provider/provider.dart';
 
@@ -62,6 +64,18 @@ class _PlaylistDetailScreenState extends State<PlaylistDetailScreen> {
   Future<void> _removeTrack(int trackId) async {
     await PlaylistDatabase.instance.removeTrack(_playlist.id!, trackId);
     await _reload();
+  }
+
+  Future<void> _hideTrack(MusicTrack track) async {
+    await context.read<Configuration>().hideTracks([track.id!]);
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Música ocultada.'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
   }
 
   Future<void> _rename() async {
@@ -274,12 +288,64 @@ class _PlaylistDetailScreenState extends State<PlaylistDetailScreen> {
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                               ),
-                              trailing: IconButton(
-                                icon: const Icon(Icons.remove_circle_outline),
-                                color: colorScheme.error,
-                                onPressed: () => _removeTrack(track.id!),
-                                tooltip: 'Remover da playlist',
+                              trailing: PopupMenuButton<String>(
+                                icon: const Icon(Icons.more_vert),
+                                onSelected: (value) async {
+                                  if (value == 'remove') {
+                                    await _removeTrack(track.id!);
+                                  } else if (value == 'rate') {
+                                    await RatingBottomSheet.show(
+                                      context,
+                                      track: track,
+                                    );
+                                  } else if (value == 'hide') {
+                                    await _hideTrack(track);
+                                  }
+                                },
+                                itemBuilder: (_) => const [
+                                  PopupMenuItem(
+                                    value: 'remove',
+                                    child: Row(
+                                      children: [
+                                        Icon(Icons.remove_circle_outline),
+                                        SizedBox(width: 12),
+                                        Text('Remover da playlist'),
+                                      ],
+                                    ),
+                                  ),
+                                  PopupMenuItem(
+                                    value: 'rate',
+                                    child: Row(
+                                      children: [
+                                        Icon(Icons.star_outline),
+                                        SizedBox(width: 12),
+                                        Text('Avaliar'),
+                                      ],
+                                    ),
+                                  ),
+                                  PopupMenuItem(
+                                    value: 'hide',
+                                    child: Row(
+                                      children: [
+                                        Icon(Icons.visibility_off_outlined),
+                                        SizedBox(width: 12),
+                                        Text('Ocultar'),
+                                      ],
+                                    ),
+                                  ),
+                                ],
                               ),
+                              onTap: () {
+                                config.playTrack(track.id!);
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (_) => FullPlayerScreen(
+                                      initialTrackId: track.id,
+                                    ),
+                                  ),
+                                );
+                              },
                             );
                           },
                         ),

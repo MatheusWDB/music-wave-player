@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:music_wave_player/components/cover_art_widget.dart';
+import 'package:music_wave_player/components/rating_bottom_sheet.dart';
 import 'package:music_wave_player/data/playlist_database.dart';
 import 'package:music_wave_player/models/configuration.dart';
 import 'package:music_wave_player/models/music_track.dart';
@@ -54,7 +55,6 @@ class _SearchScreenState extends State<SearchScreen> {
     }).toList();
   }
 
-  /// Retorna artistas cujo nome bate com a query, junto com suas faixas.
   Map<String, List<MusicTrack>> _matchingArtists(List<MusicTrack> all) {
     if (_query.isEmpty) return {};
     final Map<String, List<MusicTrack>> grouped = {};
@@ -66,7 +66,6 @@ class _SearchScreenState extends State<SearchScreen> {
     return grouped;
   }
 
-  /// Retorna álbuns cujo nome bate com a query, junto com suas faixas.
   Map<String, List<MusicTrack>> _matchingAlbums(List<MusicTrack> all) {
     if (_query.isEmpty) return {};
     final Map<String, List<MusicTrack>> grouped = {};
@@ -85,7 +84,7 @@ class _SearchScreenState extends State<SearchScreen> {
         .toList();
   }
 
-  // ── Navegação ─────────────────────────────────────────────────────────────
+  // ── Ações ─────────────────────────────────────────────────────────────────
 
   void _openTrack(BuildContext context, MusicTrack track) {
     context.read<Configuration>().playTrack(track.id!);
@@ -128,12 +127,26 @@ class _SearchScreenState extends State<SearchScreen> {
     );
   }
 
+  Future<void> _hideTrack(MusicTrack track) async {
+    await context.read<Configuration>().hideTracks([track.id!]);
+    setState(() => _query = _query);
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Música ocultada.'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  }
+
   // ── Build ─────────────────────────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
-    final allTracks = context.read<Configuration>().indexedTracks;
+    final config = context.watch<Configuration>();
+    final allTracks = config.indexedTracks;
 
     final tracks = _matchingTracks(allTracks);
     final artists = _matchingArtists(allTracks);
@@ -204,6 +217,38 @@ class _SearchScreenState extends State<SearchScreen> {
                         '${track.artist} · ${track.album}',
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
+                      ),
+                      trailing: PopupMenuButton<String>(
+                        icon: const Icon(Icons.more_vert),
+                        onSelected: (value) async {
+                          if (value == 'rate') {
+                            await RatingBottomSheet.show(context, track: track);
+                          } else if (value == 'hide') {
+                            await _hideTrack(track);
+                          }
+                        },
+                        itemBuilder: (_) => const [
+                          PopupMenuItem(
+                            value: 'rate',
+                            child: Row(
+                              children: [
+                                Icon(Icons.star_outline),
+                                SizedBox(width: 12),
+                                Text('Avaliar'),
+                              ],
+                            ),
+                          ),
+                          PopupMenuItem(
+                            value: 'hide',
+                            child: Row(
+                              children: [
+                                Icon(Icons.visibility_off_outlined),
+                                SizedBox(width: 12),
+                                Text('Ocultar'),
+                              ],
+                            ),
+                          ),
+                        ],
                       ),
                       onTap: () => _openTrack(context, track),
                     ),

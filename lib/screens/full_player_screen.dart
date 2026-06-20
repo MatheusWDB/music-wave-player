@@ -3,6 +3,8 @@ import 'package:music_wave_player/components/cover_art_widget.dart';
 import 'package:music_wave_player/components/edit_track_bottom_sheet.dart';
 import 'package:music_wave_player/components/favorite_button.dart';
 import 'package:music_wave_player/components/queue_bottom_sheet.dart';
+import 'package:music_wave_player/components/rating_bottom_sheet.dart';
+import 'package:music_wave_player/components/star_rating_widget.dart';
 import 'package:music_wave_player/models/configuration.dart';
 import 'package:music_wave_player/models/music_track.dart';
 import 'package:provider/provider.dart';
@@ -63,6 +65,8 @@ class _FullPlayerScreenState extends State<FullPlayerScreen>
       colorScheme: colorScheme,
     );
 
+    final starRating = _StarRatingRow(track: currentTrack, config: config);
+
     final slider = _SmoothProgressSlider(
       draggingValue: _draggingValue,
       onDragStart: (v) => setState(() => _draggingValue = v),
@@ -99,6 +103,8 @@ class _FullPlayerScreenState extends State<FullPlayerScreen>
             onSelected: (value) {
               if (value == 'edit') {
                 EditTrackBottomSheet.show(context, track: currentTrack);
+              } else if (value == 'rate') {
+                RatingBottomSheet.show(context, track: currentTrack);
               }
             },
             itemBuilder: (_) => [
@@ -112,6 +118,16 @@ class _FullPlayerScreenState extends State<FullPlayerScreen>
                   ],
                 ),
               ),
+              const PopupMenuItem(
+                value: 'rate',
+                child: Row(
+                  children: [
+                    Icon(Icons.star_outline),
+                    SizedBox(width: 12),
+                    Text('Avaliar'),
+                  ],
+                ),
+              ),
             ],
           ),
         ],
@@ -121,6 +137,7 @@ class _FullPlayerScreenState extends State<FullPlayerScreen>
             ? _LandscapeLayout(
                 coverWidget: coverWidget,
                 trackInfo: trackInfo,
+                starRating: starRating,
                 slider: slider,
                 controls: controls,
                 colorScheme: colorScheme,
@@ -128,6 +145,7 @@ class _FullPlayerScreenState extends State<FullPlayerScreen>
             : _PortraitLayout(
                 coverWidget: coverWidget,
                 trackInfo: trackInfo,
+                starRating: starRating,
                 slider: slider,
                 controls: controls,
                 colorScheme: colorScheme,
@@ -137,14 +155,38 @@ class _FullPlayerScreenState extends State<FullPlayerScreen>
   }
 }
 
+// ── Star rating row ───────────────────────────────────────────────────────────
+
+class _StarRatingRow extends StatelessWidget {
+  final MusicTrack track;
+  final Configuration config;
+
+  const _StarRatingRow({required this.track, required this.config});
+
+  @override
+  Widget build(BuildContext context) {
+    // Observa rating via select para rebuilds precisos
+    final rating = context.select<Configuration, double>(
+      (c) => c.currentTrack?.rating ?? 0,
+    );
+
+    return StarRatingWidget(
+      rating: rating,
+      starSize: 30,
+      onRatingChanged: (v) => config.setRating(track.id!, v),
+    );
+  }
+}
+
 // ── Layouts ───────────────────────────────────────────────────────────────────
 
 class _PortraitLayout extends StatelessWidget {
-  final Widget coverWidget, trackInfo, slider, controls;
+  final Widget coverWidget, trackInfo, starRating, slider, controls;
   final ColorScheme colorScheme;
   const _PortraitLayout({
     required this.coverWidget,
     required this.trackInfo,
+    required this.starRating,
     required this.slider,
     required this.controls,
     required this.colorScheme,
@@ -165,6 +207,8 @@ class _PortraitLayout extends StatelessWidget {
             ),
           ),
           trackInfo,
+          const SizedBox(height: 12),
+          starRating,
           const SizedBox(height: 20),
           slider,
           const SizedBox(height: 16),
@@ -177,11 +221,12 @@ class _PortraitLayout extends StatelessWidget {
 }
 
 class _LandscapeLayout extends StatelessWidget {
-  final Widget coverWidget, trackInfo, slider, controls;
+  final Widget coverWidget, trackInfo, starRating, slider, controls;
   final ColorScheme colorScheme;
   const _LandscapeLayout({
     required this.coverWidget,
     required this.trackInfo,
+    required this.starRating,
     required this.slider,
     required this.controls,
     required this.colorScheme,
@@ -206,6 +251,8 @@ class _LandscapeLayout extends StatelessWidget {
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 trackInfo,
+                const SizedBox(height: 8),
+                starRating,
                 const SizedBox(height: 16),
                 slider,
                 const SizedBox(height: 8),
