@@ -44,13 +44,24 @@ class _SearchScreenState extends State<SearchScreen> {
     setState(() => _query = value.trim().toLowerCase());
   }
 
+  List<String> _splitArtists(String artist) {
+    return artist
+        .split(';')
+        .map((a) => a.trim())
+        .where((a) => a.isNotEmpty)
+        .toList();
+  }
+
   // ── Filtros ───────────────────────────────────────────────────────────────
 
   List<MusicTrack> _matchingTracks(List<MusicTrack> all) {
     if (_query.isEmpty) return [];
     return all.where((t) {
+      final artistMatch = _splitArtists(
+        t.artist,
+      ).any((a) => a.toLowerCase().contains(_query));
       return t.title.toLowerCase().contains(_query) ||
-          t.artist.toLowerCase().contains(_query) ||
+          artistMatch ||
           t.album.toLowerCase().contains(_query);
     }).toList();
   }
@@ -59,8 +70,10 @@ class _SearchScreenState extends State<SearchScreen> {
     if (_query.isEmpty) return {};
     final Map<String, List<MusicTrack>> grouped = {};
     for (final track in all) {
-      if (track.artist.toLowerCase().contains(_query)) {
-        grouped.putIfAbsent(track.artist, () => []).add(track);
+      for (final artist in _splitArtists(track.artist)) {
+        if (artist.toLowerCase().contains(_query)) {
+          grouped.putIfAbsent(artist, () => []).add(track);
+        }
       }
     }
     return grouped;

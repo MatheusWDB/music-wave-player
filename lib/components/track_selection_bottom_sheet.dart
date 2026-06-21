@@ -2,9 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:music_wave_player/models/music_track.dart';
 import 'package:music_wave_player/components/cover_art_widget.dart';
 
-/// BottomSheet para selecionar múltiplas músicas com checkbox.
-///
-/// Retorna a lista de IDs selecionados ao confirmar, ou null se cancelado.
 class TrackSelectionBottomSheet extends StatefulWidget {
   final List<MusicTrack> tracks;
   final List<int> alreadySelected;
@@ -61,13 +58,10 @@ class _TrackSelectionBottomSheetState extends State<TrackSelectionBottomSheet> {
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
-    final bottomInset =
-        MediaQuery.of(context).viewInsets.bottom +
-        MediaQuery.of(context).padding.bottom;
+    final bottomInset = MediaQuery.of(context).padding.bottom;
 
     return Container(
       height: MediaQuery.of(context).size.height * 0.85,
-      padding: EdgeInsets.only(bottom: bottomInset),
       decoration: BoxDecoration(
         color: colorScheme.surface,
         borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
@@ -145,7 +139,7 @@ class _TrackSelectionBottomSheetState extends State<TrackSelectionBottomSheet> {
           const Divider(height: 1),
           // Botões
           Padding(
-            padding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
+            padding: EdgeInsets.fromLTRB(20, 12, 20, 16 + bottomInset),
             child: Row(
               children: [
                 Expanded(

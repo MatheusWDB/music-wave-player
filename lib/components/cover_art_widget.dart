@@ -21,7 +21,6 @@ class CoverArtWidget extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
     final radius = borderRadius ?? BorderRadius.circular(8);
 
     // Se size for finito, usa diretamente no SizedBox
@@ -32,10 +31,9 @@ class CoverArtWidget extends StatelessWidget {
             fit: BoxFit.cover,
             width: size.isFinite ? size : null,
             height: size.isFinite ? size : null,
-            errorBuilder: (_, __, ___) =>
-                _Placeholder(colorScheme: colorScheme),
+            errorBuilder: (_, __, ___) => _Placeholder(),
           )
-        : _Placeholder(colorScheme: colorScheme);
+        : _Placeholder();
 
     return ClipRRect(
       borderRadius: radius,
@@ -47,25 +45,17 @@ class CoverArtWidget extends StatelessWidget {
 }
 
 class _Placeholder extends StatelessWidget {
-  final ColorScheme colorScheme;
-  const _Placeholder({required this.colorScheme});
+  const _Placeholder();
 
   @override
   Widget build(BuildContext context) {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        // Usa o menor lado disponível para calcular o tamanho do ícone
-        final available = constraints.biggest.shortestSide;
-        final iconSize = available.isFinite ? available * 0.55 : 48.0;
-        return Container(
-          color: colorScheme.primaryContainer,
-          child: Icon(
-            Icons.music_note,
-            color: colorScheme.onPrimaryContainer,
-            size: iconSize,
-          ),
-        );
-      },
+    final colorScheme = Theme.of(context).colorScheme;
+    return Container(
+      color: colorScheme.primaryContainer,
+      child: Padding(
+        padding: const EdgeInsets.all(8.0),
+        child: Image.asset('assets/icon/icon (1).png', fit: BoxFit.contain),
+      ),
     );
   }
 }

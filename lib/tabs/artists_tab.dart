@@ -11,7 +11,13 @@ class ArtistsTab extends StatelessWidget {
   Map<String, List<MusicTrack>> _groupByArtist() {
     final Map<String, List<MusicTrack>> grouped = {};
     for (final track in tracks) {
-      grouped.putIfAbsent(track.artist, () => []).add(track);
+      final artists = track.artist
+          .split(';')
+          .map((a) => a.trim())
+          .where((a) => a.isNotEmpty);
+      for (final artist in artists) {
+        grouped.putIfAbsent(artist, () => []).add(track);
+      }
     }
     final sortedKeys = grouped.keys.toList()
       ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));

@@ -77,7 +77,6 @@ class _QueueBottomSheetState extends State<QueueBottomSheet> {
     }
   }
 
-  /// Gera um nome único: se "Nome" já existe, tenta "Nome (1)", "Nome (2)", etc.
   Future<String> _resolvePlaylistName(String base) async {
     final existing = await PlaylistDatabase.instance.readAllPlaylists();
     final names = existing.map((p) => p.name).toSet();
@@ -121,6 +120,7 @@ class _QueueBottomSheetState extends State<QueueBottomSheet> {
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
+    final bottomInset = MediaQuery.of(context).padding.bottom;
     final config = context.watch<Configuration>();
     final fullQueue = config.playbackQueue;
     final tracks = config.indexedTracks;
@@ -223,7 +223,7 @@ class _QueueBottomSheetState extends State<QueueBottomSheet> {
                   )
                 : ReorderableListView.builder(
                     scrollController: _scrollController,
-                    padding: const EdgeInsets.only(bottom: 16),
+                    padding: EdgeInsets.only(bottom: 16 + bottomInset),
                     itemCount: nextQueue.length,
                     onReorder: (oldIndex, newIndex) {
                       final realOld = currentIndex + 1 + oldIndex;

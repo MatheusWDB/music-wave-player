@@ -1,0 +1,10 @@
+flutter_launcher_icons:
+  android: true
+  ios: false
+  image_path: "assets/icon/icon.png"
+
+  adaptive_icon_background: "#0D1B2A"
+  adaptive_icon_foreground: "assets/icon/icon.png"
+
+  android_notification_icon: "assets/icon/icon_notification.png"
+  android_notification_icon_name: "ic_notification"
