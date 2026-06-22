@@ -5,8 +5,10 @@ import 'package:music_wave_player/components/favorite_button.dart';
 import 'package:music_wave_player/components/queue_bottom_sheet.dart';
 import 'package:music_wave_player/components/rating_bottom_sheet.dart';
 import 'package:music_wave_player/components/star_rating_widget.dart';
+import 'package:music_wave_player/components/timer_bottom_sheet.dart';
 import 'package:music_wave_player/models/configuration.dart';
 import 'package:music_wave_player/models/music_track.dart';
+import 'package:music_wave_player/services/timer_service.dart';
 import 'package:provider/provider.dart';
 
 class FullPlayerScreen extends StatefulWidget {
@@ -32,6 +34,9 @@ class _FullPlayerScreenState extends State<FullPlayerScreen>
     );
     final repeatMode = context.select<Configuration, String>(
       (c) => c.repeatMode,
+    );
+    final timerActive = context.select<SleepTimerService, bool>(
+      (t) => t.isActive,
     );
     final config = context.read<Configuration>();
     final colorScheme = Theme.of(context).colorScheme;
@@ -93,6 +98,15 @@ class _FullPlayerScreenState extends State<FullPlayerScreen>
         centerTitle: true,
         actions: [
           FavoriteButton(trackId: currentTrack.id!),
+          // Botão do temporizador — muda de cor quando ativo
+          IconButton(
+            icon: Icon(
+              Icons.bedtime_outlined,
+              color: timerActive ? colorScheme.secondary : null,
+            ),
+            tooltip: 'Temporizador de sono',
+            onPressed: () => TimerBottomSheet.show(context),
+          ),
           IconButton(
             icon: const Icon(Icons.queue_music),
             tooltip: 'Fila de reprodução',
@@ -165,7 +179,6 @@ class _StarRatingRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Observa rating via select para rebuilds precisos
     final rating = context.select<Configuration, double>(
       (c) => c.currentTrack?.rating ?? 0,
     );

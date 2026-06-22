@@ -5,20 +5,61 @@ import 'package:music_wave_player/models/music_track.dart';
 import 'package:music_wave_player/screens/full_player_screen.dart';
 import 'package:provider/provider.dart';
 
-class RecentlyPlayedScreen extends StatelessWidget {
+class RecentlyPlayedScreen extends StatefulWidget {
   const RecentlyPlayedScreen({super.key});
+
+  @override
+  State<RecentlyPlayedScreen> createState() => _RecentlyPlayedScreenState();
+}
+
+class _RecentlyPlayedScreenState extends State<RecentlyPlayedScreen> {
+  static const _limitOptions = [10, 25, 50, 100];
+  int _limit = 25;
 
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     final config = context.watch<Configuration>();
-    final tracks = config.recentlyPlayedTracks;
+    final allTracks = config.recentlyPlayedTracks;
+    final tracks = allTracks.take(_limit).toList();
 
     return Scaffold(
       appBar: AppBar(
         title: const Text('Reproduzidas recentemente'),
         actions: [
-          if (tracks.isNotEmpty)
+          // Filtro de quantidade
+          PopupMenuButton<int>(
+            icon: const Icon(Icons.filter_list),
+            tooltip: 'Quantidade exibida',
+            initialValue: _limit,
+            onSelected: (value) => setState(() => _limit = value),
+            itemBuilder: (_) => _limitOptions.map((opt) {
+              final isSelected = opt == _limit;
+              return PopupMenuItem(
+                value: opt,
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.check,
+                      size: 18,
+                      color: isSelected
+                          ? colorScheme.primary
+                          : Colors.transparent,
+                    ),
+                    const SizedBox(width: 10),
+                    Text(
+                      'Últimas $opt',
+                      style: TextStyle(
+                        color: isSelected ? colorScheme.primary : null,
+                        fontWeight: isSelected ? FontWeight.bold : null,
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            }).toList(),
+          ),
+          if (allTracks.isNotEmpty)
             IconButton(
               icon: const Icon(Icons.delete_sweep_outlined),
               tooltip: 'Limpar histórico',

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:music_wave_player/models/configuration.dart';
 import 'package:music_wave_player/screens/library_screen.dart';
 import 'package:music_wave_player/services/music_audio_handler.dart';
+import 'package:music_wave_player/services/timer_service.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:provider/provider.dart';
 
@@ -15,12 +16,15 @@ const Color colorAction = Color(0xFFE63946);
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Cria Configuration vazio — zero I/O, instantâneo
   final config = Configuration.empty();
 
-  // Inicializa AudioService (necessário antes do runApp)
+  late final MusicAudioHandler rawHandler;
+
   final audioHandler = await AudioService.init(
-    builder: () => MusicAudioHandler(config),
+    builder: () {
+      rawHandler = MusicAudioHandler(config);
+      return rawHandler;
+    },
     config: const AudioServiceConfig(
       androidNotificationChannelId: 'br.com.hematsu.music_wave_player.channel',
       androidNotificationChannelName: 'MusicWave Player',
@@ -31,21 +35,23 @@ Future<void> main() async {
 
   config.audioHandler = audioHandler;
 
+  final timerService = SleepTimerService(config);
+
+  // Injeta o timer no handler para que ele possa pausar nos eventos de faixa
+  rawHandler.setTimerService(timerService);
+
   runApp(
-    ChangeNotifierProvider<Configuration>.value(
-      value: config,
+    MultiProvider(
+      providers: [
+        ChangeNotifierProvider<Configuration>.value(value: config),
+        ChangeNotifierProvider<SleepTimerService>.value(value: timerService),
+      ],
       child: const MyApp(),
     ),
   );
 
-  // CORREÇÃO ANR: carrega SQLite só depois que o primeiro frame foi renderizado.
-  // Isso garante que a UI está visível antes de qualquer I/O pesado,
-  // e que o processo do audio_service em background não trava no boot.
   WidgetsBinding.instance.addPostFrameCallback((_) async {
-    // Solicita permissão de notificação (Android 13+)
     await Permission.notification.request();
-
-    // Agora carrega dados do storage de forma segura
     await config.loadFromStorageAsync();
   });
 }

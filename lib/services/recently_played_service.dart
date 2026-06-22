@@ -2,7 +2,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 class RecentlyPlayedService {
   static const _kKey = 'recently_played_ids';
-  static const _maxSize = 5;
+  static const _maxSize = 100;
 
   /// Adiciona [id] ao histórico. Remove duplicata existente antes de inserir
   /// no topo. Mantém no máximo [_maxSize] entradas.

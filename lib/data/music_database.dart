@@ -19,6 +19,7 @@ class MusicDatabase {
   static const String columnDurationMs = 'duration_ms';
   static const String columnIsHidden = 'is_hidden';
   static const String columnRating = 'rating';
+  static const String columnAddedAt = 'added_at';
 
   Future<Database> get database async {
     if (_database != null) return _database!;
@@ -31,7 +32,7 @@ class MusicDatabase {
     final path = join(dbPath, filePath);
     return await openDatabase(
       path,
-      version: 6,
+      version: 7,
       onCreate: _createDB,
       onUpgrade: _upgradeDB,
     );
@@ -49,7 +50,8 @@ class MusicDatabase {
         $columnCoverPath  TEXT,
         $columnDurationMs INTEGER NOT NULL DEFAULT 0,
         $columnIsHidden   INTEGER NOT NULL DEFAULT 0,
-        $columnRating     REAL NOT NULL DEFAULT 0
+        $columnRating     REAL NOT NULL DEFAULT 0,
+        $columnAddedAt    TEXT
       )
     ''');
   }
@@ -80,11 +82,21 @@ class MusicDatabase {
         'ALTER TABLE $tableTracks ADD COLUMN $columnRating REAL NOT NULL DEFAULT 0',
       );
     }
+    if (oldVersion < 7) {
+      await db.execute(
+        'ALTER TABLE $tableTracks ADD COLUMN $columnAddedAt TEXT',
+      );
+      // Preenche faixas existentes com a data atual
+      await db.execute(
+        "UPDATE $tableTracks SET $columnAddedAt = '${DateTime.now().toIso8601String()}' WHERE $columnAddedAt IS NULL",
+      );
+    }
   }
 
   Future<List<MusicTrack>> insertTracks(List<MusicTrack> tracks) async {
     final db = await instance.database;
     final List<MusicTrack> savedTracks = [];
+    final now = DateTime.now().toIso8601String();
 
     await db.transaction((txn) async {
       await txn.delete(tableTracks, where: '$columnIsEdited = 0');
@@ -101,9 +113,13 @@ class MusicDatabase {
           continue;
         }
 
+        final map = track.toMap();
+        // Garante que novas faixas sempre tenham added_at
+        map[columnAddedAt] ??= now;
+
         final id = await txn.insert(
           tableTracks,
-          track.toMap(),
+          map,
           conflictAlgorithm: ConflictAlgorithm.replace,
         );
         savedTracks.add(track.copyWith(id: id));

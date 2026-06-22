@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:music_wave_player/components/cover_art_widget.dart';
+import 'package:music_wave_player/components/timer_bottom_sheet.dart';
 import 'package:music_wave_player/data/playlist_database.dart';
 import 'package:music_wave_player/models/configuration.dart';
 import 'package:music_wave_player/models/music_track.dart';
+import 'package:music_wave_player/services/timer_service.dart';
 import 'package:provider/provider.dart';
 
 class QueueBottomSheet extends StatefulWidget {
@@ -122,6 +124,7 @@ class _QueueBottomSheetState extends State<QueueBottomSheet> {
     final colorScheme = Theme.of(context).colorScheme;
     final bottomInset = MediaQuery.of(context).padding.bottom;
     final config = context.watch<Configuration>();
+    final timer = context.watch<SleepTimerService>();
     final fullQueue = config.playbackQueue;
     final tracks = config.indexedTracks;
     final currentIndex = config.currentQueueIndex;
@@ -163,6 +166,7 @@ class _QueueBottomSheetState extends State<QueueBottomSheet> {
               ),
             ),
           ),
+
           // Cabeçalho
           Padding(
             padding: const EdgeInsets.fromLTRB(20, 0, 8, 8),
@@ -197,6 +201,49 @@ class _QueueBottomSheetState extends State<QueueBottomSheet> {
               ],
             ),
           ),
+
+          // Banner do temporizador ativo
+          if (timer.isActive)
+            GestureDetector(
+              onTap: () => TimerBottomSheet.show(context),
+              child: Container(
+                margin: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 8,
+                ),
+                decoration: BoxDecoration(
+                  color: colorScheme.primaryContainer.withValues(alpha: 0.5),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.bedtime_outlined,
+                      size: 16,
+                      color: colorScheme.primary,
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Temporizador: ${timer.remainingLabel}',
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: colorScheme.primary,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ),
+                    Icon(
+                      Icons.chevron_right,
+                      size: 16,
+                      color: colorScheme.primary,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+
           const Divider(height: 1),
 
           // Música atual

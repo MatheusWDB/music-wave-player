@@ -6,23 +6,29 @@ import 'package:flutter/foundation.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:music_wave_player/data/play_session_database.dart';
 import 'package:music_wave_player/models/configuration.dart';
+import 'package:music_wave_player/services/timer_service.dart';
 import 'package:rxdart/rxdart.dart';
 
 class MusicAudioHandler extends BaseAudioHandler with SeekHandler {
   final AudioPlayer _player = AudioPlayer();
   final Configuration _config;
+  SleepTimerService? _timerService;
 
   Timer? _periodicSaveTimer;
 
-  // Rastreia sessão atual de reprodução
   int? _sessionTrackId;
   int _sessionSecondsAccumulated = 0;
-  int _sessionSecondsSaved = 0; // quanto já foi persistido no banco
+  int _sessionSecondsSaved = 0;
   DateTime? _sessionStartedAt;
 
   MusicAudioHandler(this._config) {
     _emitIdleState();
     _initPlayerListeners();
+  }
+
+  /// Injeta o SleepTimerService após a criação (evita dependência circular).
+  void setTimerService(SleepTimerService timerService) {
+    _timerService = timerService;
   }
 
   void _emitIdleState() {
@@ -57,13 +63,18 @@ class MusicAudioHandler extends BaseAudioHandler with SeekHandler {
 
     _player.playerStateStream.listen((state) {
       if (state.processingState == ProcessingState.completed) {
+        // Verifica se o timer deve pausar antes de avançar
+        final shouldPause = _timerService?.onTrackFinished() ?? false;
+        if (shouldPause) {
+          _player.pause();
+          return;
+        }
         _config.trackDidFinish();
       }
 
       final isActuallyPlaying =
           state.playing && state.processingState != ProcessingState.completed;
 
-      // Ignora estados transitórios para não interferir na sessão
       final isTransitioning =
           state.processingState == ProcessingState.loading ||
           state.processingState == ProcessingState.buffering;
@@ -98,7 +109,6 @@ class MusicAudioHandler extends BaseAudioHandler with SeekHandler {
   void _pauseSession() {
     if (_sessionStartedAt == null) return;
 
-    // Ignora pausas falsas dentro de 1s do resume (artefato do just_audio)
     final sinceResume = DateTime.now()
         .difference(_sessionStartedAt!)
         .inMilliseconds;
@@ -116,12 +126,9 @@ class MusicAudioHandler extends BaseAudioHandler with SeekHandler {
     _sessionStartedAt = null;
   }
 
-  /// Persiste o delta acumulado desde o último save parcial.
-  /// Chamado pelo timer periódico enquanto a música toca.
   Future<void> _saveSessionDelta() async {
     if (_sessionTrackId == null) return;
 
-    // Inclui o tempo rodando desde o último resume
     int currentAccumulated = _sessionSecondsAccumulated;
     if (_sessionStartedAt != null) {
       currentAccumulated += DateTime.now()
@@ -139,7 +146,6 @@ class MusicAudioHandler extends BaseAudioHandler with SeekHandler {
     _sessionSecondsSaved += delta;
   }
 
-  /// Salva o restante não persistido e encerra a sessão atual.
   Future<void> _flushSession() async {
     _pauseSession();
     final trackId = _sessionTrackId;
@@ -225,12 +231,10 @@ class MusicAudioHandler extends BaseAudioHandler with SeekHandler {
       final path = extras!['path'] as String;
       if (kDebugMode) print('AudioHandler: loadTrack → $path');
 
-      // Salva sessão da faixa anterior antes de trocar
       await _flushSession();
 
       final track = _config.currentTrack;
 
-      // Inicia sessão ANTES de carregar o arquivo para capturar todos os estados
       if (track?.id != null) _startSession(track!.id!);
 
       Uri? artUri;

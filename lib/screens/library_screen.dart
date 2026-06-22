@@ -4,6 +4,8 @@ import 'package:music_wave_player/components/library_components/tabs_component.d
 import 'package:music_wave_player/components/recap_widget.dart';
 import 'package:music_wave_player/models/configuration.dart';
 import 'package:music_wave_player/screens/hidden_tracks_screen.dart';
+import 'package:music_wave_player/screens/most_played_screen.dart';
+import 'package:music_wave_player/screens/recently_added_screen.dart';
 import 'package:music_wave_player/screens/recently_played_screen.dart';
 import 'package:music_wave_player/screens/root_directory_config_screen.dart';
 import 'package:music_wave_player/screens/search_screen.dart';
@@ -35,11 +37,11 @@ class _LibraryScreenState extends State<LibraryScreen> {
     }
   }
 
-  void _openSettingsMenu(BuildContext context) {
+  void _openMenu(BuildContext context) {
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
-      builder: (_) => const _SettingsMenu(),
+      builder: (_) => const _AppMenu(),
     );
   }
 
@@ -85,8 +87,8 @@ class _LibraryScreenState extends State<LibraryScreen> {
                     icon: Icon(Icons.search, color: colorScheme.onSurface),
                   ),
                   IconButton(
-                    onPressed: () => _openSettingsMenu(context),
-                    icon: Icon(Icons.settings, color: colorScheme.onSurface),
+                    onPressed: () => _openMenu(context),
+                    icon: Icon(Icons.apps, color: colorScheme.onSurface),
                   ),
                 ],
               ),
@@ -103,13 +105,18 @@ class _LibraryScreenState extends State<LibraryScreen> {
   }
 }
 
-class _SettingsMenu extends StatelessWidget {
-  const _SettingsMenu();
+class _AppMenu extends StatelessWidget {
+  const _AppMenu();
 
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     final bottomInset = MediaQuery.of(context).padding.bottom;
+
+    void go(Widget screen) {
+      Navigator.pop(context);
+      Navigator.push(context, MaterialPageRoute(builder: (_) => screen));
+    }
 
     return Container(
       decoration: BoxDecoration(
@@ -137,15 +144,7 @@ class _SettingsMenu extends StatelessWidget {
             ),
             title: const Text('Biblioteca'),
             subtitle: const Text('Configurar pasta e reindexar'),
-            onTap: () {
-              Navigator.pop(context);
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => const RootDirectoryConfigScreen(),
-                ),
-              );
-            },
+            onTap: () => go(const RootDirectoryConfigScreen()),
           ),
           ListTile(
             leading: Icon(
@@ -154,25 +153,25 @@ class _SettingsMenu extends StatelessWidget {
             ),
             title: const Text('Músicas ocultas'),
             subtitle: const Text('Ver e reexibir músicas ocultadas'),
-            onTap: () {
-              Navigator.pop(context);
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const HiddenTracksScreen()),
-              );
-            },
+            onTap: () => go(const HiddenTracksScreen()),
           ),
           ListTile(
             leading: Icon(Icons.bar_chart_outlined, color: colorScheme.primary),
             title: const Text('Estatísticas'),
             subtitle: const Text('Tempo ouvido por música e artista'),
-            onTap: () {
-              Navigator.pop(context);
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const StatisticsScreen()),
-              );
-            },
+            onTap: () => go(const StatisticsScreen()),
+          ),
+          ListTile(
+            leading: Icon(Icons.trending_up, color: colorScheme.primary),
+            title: const Text('Mais / Menos ouvidas'),
+            subtitle: const Text('Ranking de reprodução por período'),
+            onTap: () => go(const MostPlayedScreen()),
+          ),
+          ListTile(
+            leading: Icon(Icons.fiber_new_outlined, color: colorScheme.primary),
+            title: const Text('Adicionadas recentemente'),
+            subtitle: const Text('Músicas indexadas mais recentemente'),
+            onTap: () => go(const RecentlyAddedScreen()),
           ),
           SizedBox(height: 16 + bottomInset),
         ],
