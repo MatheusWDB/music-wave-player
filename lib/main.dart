@@ -28,7 +28,7 @@ Future<void> main() async {
     config: const AudioServiceConfig(
       androidNotificationChannelId: 'br.com.hematsu.music_wave_player.channel',
       androidNotificationChannelName: 'MusicWave Player',
-      androidNotificationIcon: 'mipmap/ic_launcher',
+      androidNotificationIcon: 'drawable/ic_notification',
       androidStopForegroundOnPause: false,
     ),
   );
