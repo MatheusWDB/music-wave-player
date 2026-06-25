@@ -118,11 +118,9 @@ class _AppMenu extends StatelessWidget {
       Navigator.push(context, MaterialPageRoute(builder: (_) => screen));
     }
 
-    return Container(
-      decoration: BoxDecoration(
-        color: colorScheme.surface,
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-      ),
+    return Material(
+      color: colorScheme.surface,
+      borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [

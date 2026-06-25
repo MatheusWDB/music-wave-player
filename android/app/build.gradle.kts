@@ -27,6 +27,13 @@ android {
             signingConfig = signingConfigs.getByName("debug")
         }
     }
+    packagingOptions {
+        jniLibs {
+            pickFirst("lib/arm64-v8a/libc++_shared.so")
+            pickFirst("lib/armeabi-v7a/libc++_shared.so")
+            pickFirst("lib/x86_64/libc++_shared.so")
+        }
+    }
 }
 flutter {
     source = "../.."

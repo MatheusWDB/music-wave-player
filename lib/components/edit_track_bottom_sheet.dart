@@ -108,132 +108,132 @@ class _EditTrackBottomSheetState extends State<EditTrackBottomSheet> {
         MediaQuery.of(context).viewInsets.bottom +
         MediaQuery.of(context).padding.bottom;
 
-    return Container(
-      padding: EdgeInsets.fromLTRB(24, 20, 24, 24 + bottomInset),
-      decoration: BoxDecoration(
-        color: colorScheme.surface,
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Center(
-            child: Container(
-              width: 40,
-              height: 4,
-              margin: const EdgeInsets.only(bottom: 20),
-              decoration: BoxDecoration(
-                color: colorScheme.onSurfaceVariant.withValues(alpha: 0.3),
-                borderRadius: BorderRadius.circular(2),
+    return Material(
+      color: colorScheme.surface,
+      borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+      child: Padding(
+        padding: EdgeInsets.fromLTRB(24, 20, 24, 24 + bottomInset),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Center(
+              child: Container(
+                width: 40,
+                height: 4,
+                margin: const EdgeInsets.only(bottom: 20),
+                decoration: BoxDecoration(
+                  color: colorScheme.onSurfaceVariant.withValues(alpha: 0.3),
+                  borderRadius: BorderRadius.circular(2),
+                ),
               ),
             ),
-          ),
-          Row(
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Editar informações',
-                      style: TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
-                        color: colorScheme.onSurface,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      widget.track.path.split('/').last,
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: colorScheme.onSurfaceVariant.withValues(
-                          alpha: 0.6,
+            Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Editar informações',
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                          color: colorScheme.onSurface,
                         ),
                       ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ],
+                      const SizedBox(height: 4),
+                      Text(
+                        widget.track.path.split('/').last,
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: colorScheme.onSurfaceVariant.withValues(
+                            alpha: 0.6,
+                          ),
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ),
                 ),
-              ),
-              // Botão adicionar à playlist
-              IconButton(
-                onPressed: _addToPlaylist,
-                icon: const Icon(Icons.playlist_add_outlined),
-                tooltip: 'Adicionar à playlist',
-                color: colorScheme.primary,
-              ),
-            ],
-          ),
-          const SizedBox(height: 24),
-          Form(
-            key: _formKey,
-            child: Column(
-              children: [
-                _Field(
-                  controller: _titleCtrl,
-                  label: 'Título',
-                  icon: Icons.music_note_outlined,
-                  validator: (v) =>
-                      (v == null || v.trim().isEmpty) ? 'Obrigatório' : null,
-                ),
-                const SizedBox(height: 16),
-                _Field(
-                  controller: _artistCtrl,
-                  label: 'Artista',
-                  icon: Icons.person_outline,
-                ),
-                const SizedBox(height: 16),
-                _Field(
-                  controller: _albumCtrl,
-                  label: 'Álbum',
-                  icon: Icons.album_outlined,
+                // Botão adicionar à playlist
+                IconButton(
+                  onPressed: _addToPlaylist,
+                  icon: const Icon(Icons.playlist_add_outlined),
+                  tooltip: 'Adicionar à playlist',
+                  color: colorScheme.primary,
                 ),
               ],
             ),
-          ),
-          const SizedBox(height: 28),
-          Row(
-            children: [
-              Expanded(
-                child: OutlinedButton(
-                  onPressed: _isSaving ? null : () => Navigator.pop(context),
-                  style: OutlinedButton.styleFrom(
-                    minimumSize: const Size.fromHeight(48),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
+            const SizedBox(height: 24),
+            Form(
+              key: _formKey,
+              child: Column(
+                children: [
+                  _Field(
+                    controller: _titleCtrl,
+                    label: 'Título',
+                    icon: Icons.music_note_outlined,
+                    validator: (v) =>
+                        (v == null || v.trim().isEmpty) ? 'Obrigatório' : null,
                   ),
-                  child: const Text('Cancelar'),
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: FilledButton(
-                  onPressed: _isSaving ? null : _save,
-                  style: FilledButton.styleFrom(
-                    minimumSize: const Size.fromHeight(48),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
+                  const SizedBox(height: 16),
+                  _Field(
+                    controller: _artistCtrl,
+                    label: 'Artista',
+                    icon: Icons.person_outline,
                   ),
-                  child: _isSaving
-                      ? const SizedBox(
-                          width: 20,
-                          height: 20,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2.5,
-                            color: Colors.white,
-                          ),
-                        )
-                      : const Text('Salvar'),
-                ),
+                  const SizedBox(height: 16),
+                  _Field(
+                    controller: _albumCtrl,
+                    label: 'Álbum',
+                    icon: Icons.album_outlined,
+                  ),
+                ],
               ),
-            ],
-          ),
-        ],
+            ),
+            const SizedBox(height: 28),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed: _isSaving ? null : () => Navigator.pop(context),
+                    style: OutlinedButton.styleFrom(
+                      minimumSize: const Size.fromHeight(48),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                    child: const Text('Cancelar'),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: FilledButton(
+                    onPressed: _isSaving ? null : _save,
+                    style: FilledButton.styleFrom(
+                      minimumSize: const Size.fromHeight(48),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                    child: _isSaving
+                        ? const SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2.5,
+                              color: Colors.white,
+                            ),
+                          )
+                        : const Text('Salvar'),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
       ),
     );
   }

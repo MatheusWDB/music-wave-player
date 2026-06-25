@@ -1,4 +1,3 @@
-import 'package:audio_service/audio_service.dart';
 import 'package:flutter/material.dart';
 import 'package:music_wave_player/models/configuration.dart';
 import 'package:music_wave_player/screens/library_screen.dart';
@@ -18,27 +17,11 @@ Future<void> main() async {
 
   final config = Configuration.empty();
 
-  late final MusicAudioHandler rawHandler;
-
-  final audioHandler = await AudioService.init(
-    builder: () {
-      rawHandler = MusicAudioHandler(config);
-      return rawHandler;
-    },
-    config: const AudioServiceConfig(
-      androidNotificationChannelId: 'br.com.hematsu.music_wave_player.channel',
-      androidNotificationChannelName: 'MusicWave Player',
-      androidNotificationIcon: 'drawable/ic_notification',
-      androidStopForegroundOnPause: false,
-    ),
-  );
-
-  config.audioHandler = audioHandler;
+  final handler = MusicAudioHandler(config);
+  config.audioHandler = handler;
 
   final timerService = SleepTimerService(config);
-
-  // Injeta o timer no handler para que ele possa pausar nos eventos de faixa
-  rawHandler.setTimerService(timerService);
+  handler.setTimerService(timerService);
 
   runApp(
     MultiProvider(

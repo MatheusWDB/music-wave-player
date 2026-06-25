@@ -5,6 +5,7 @@ import 'package:music_wave_player/components/favorite_button.dart';
 import 'package:music_wave_player/components/queue_bottom_sheet.dart';
 import 'package:music_wave_player/components/rating_bottom_sheet.dart';
 import 'package:music_wave_player/components/star_rating_widget.dart';
+import 'package:music_wave_player/components/speed_bottom_sheet.dart';
 import 'package:music_wave_player/components/timer_bottom_sheet.dart';
 import 'package:music_wave_player/models/configuration.dart';
 import 'package:music_wave_player/models/music_track.dart';
@@ -82,10 +83,15 @@ class _FullPlayerScreenState extends State<FullPlayerScreen>
       },
     );
 
+    final playbackSpeed = context.select<Configuration, double>(
+      (c) => c.playbackSpeed,
+    );
+
     final controls = _Controls(
       isPlaying: isPlaying,
       isShuffleActive: isShuffleActive,
       repeatMode: repeatMode,
+      playbackSpeed: playbackSpeed,
       config: config,
       colorScheme: colorScheme,
     );
@@ -485,65 +491,93 @@ class _TrackInfo extends StatelessWidget {
 class _Controls extends StatelessWidget {
   final bool isPlaying, isShuffleActive;
   final String repeatMode;
+  final double playbackSpeed;
   final Configuration config;
   final ColorScheme colorScheme;
   const _Controls({
     required this.isPlaying,
     required this.isShuffleActive,
     required this.repeatMode,
+    required this.playbackSpeed,
     required this.config,
     required this.colorScheme,
   });
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceAround,
+    return Column(
+      mainAxisSize: MainAxisSize.min,
       children: [
-        IconButton(
-          icon: Icon(
-            Icons.shuffle,
-            color: isShuffleActive
-                ? colorScheme.primary
-                : colorScheme.onSurfaceVariant,
-          ),
-          iconSize: 26,
-          onPressed: config.toggleShuffle,
-        ),
-        IconButton(
-          icon: Icon(Icons.skip_previous, color: colorScheme.primary),
-          iconSize: 44,
-          onPressed: config.playPreviousTrack,
-        ),
-        Container(
-          decoration: BoxDecoration(
-            color: colorScheme.primary,
-            shape: BoxShape.circle,
-          ),
-          child: IconButton(
-            icon: Icon(
-              isPlaying ? Icons.pause : Icons.play_arrow,
-              color: colorScheme.onPrimary,
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceAround,
+          children: [
+            IconButton(
+              icon: Icon(
+                Icons.shuffle,
+                color: isShuffleActive
+                    ? colorScheme.primary
+                    : colorScheme.onSurfaceVariant,
+              ),
+              iconSize: 26,
+              onPressed: config.toggleShuffle,
             ),
-            iconSize: 38,
-            padding: const EdgeInsets.all(10),
-            onPressed: config.togglePlayPause,
-          ),
+            IconButton(
+              icon: Icon(Icons.skip_previous, color: colorScheme.primary),
+              iconSize: 44,
+              onPressed: config.playPreviousTrack,
+            ),
+            Container(
+              decoration: BoxDecoration(
+                color: colorScheme.primary,
+                shape: BoxShape.circle,
+              ),
+              child: IconButton(
+                icon: Icon(
+                  isPlaying ? Icons.pause : Icons.play_arrow,
+                  color: colorScheme.onPrimary,
+                ),
+                iconSize: 38,
+                padding: const EdgeInsets.all(10),
+                onPressed: config.togglePlayPause,
+              ),
+            ),
+            IconButton(
+              icon: Icon(Icons.skip_next, color: colorScheme.primary),
+              iconSize: 44,
+              onPressed: config.playNextTrack,
+            ),
+            IconButton(
+              icon: Icon(
+                repeatMode == 'One' ? Icons.repeat_one : Icons.repeat,
+                color: repeatMode == 'Off'
+                    ? colorScheme.onSurfaceVariant
+                    : colorScheme.primary,
+              ),
+              iconSize: 26,
+              onPressed: config.toggleRepeatMode,
+            ),
+          ],
         ),
-        IconButton(
-          icon: Icon(Icons.skip_next, color: colorScheme.primary),
-          iconSize: 44,
-          onPressed: config.playNextTrack,
-        ),
-        IconButton(
-          icon: Icon(
-            repeatMode == 'One' ? Icons.repeat_one : Icons.repeat,
-            color: repeatMode == 'Off'
-                ? colorScheme.onSurfaceVariant
-                : colorScheme.primary,
+        Builder(
+          builder: (ctx) => TextButton.icon(
+            onPressed: () => SpeedBottomSheet.show(ctx),
+            icon: Icon(
+              Icons.speed,
+              size: 16,
+              color: playbackSpeed != 1.0
+                  ? colorScheme.primary
+                  : colorScheme.onSurfaceVariant,
+            ),
+            label: Text(
+              playbackSpeed == 1.0 ? 'Normal' : '${playbackSpeed}x',
+              style: TextStyle(
+                fontSize: 13,
+                color: playbackSpeed != 1.0
+                    ? colorScheme.primary
+                    : colorScheme.onSurfaceVariant,
+              ),
+            ),
           ),
-          iconSize: 26,
-          onPressed: config.toggleRepeatMode,
         ),
       ],
     );

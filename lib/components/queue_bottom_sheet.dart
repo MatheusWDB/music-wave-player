@@ -146,195 +146,201 @@ class _QueueBottomSheetState extends State<QueueBottomSheet> {
         ? fullQueue.sublist(currentIndex + 1)
         : <int>[];
 
-    return Container(
-      height: MediaQuery.of(context).size.height * 0.75,
-      decoration: BoxDecoration(
-        color: colorScheme.surface,
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-      ),
-      child: Column(
-        children: [
-          // Alça
-          Center(
-            child: Container(
-              width: 40,
-              height: 4,
-              margin: const EdgeInsets.symmetric(vertical: 12),
-              decoration: BoxDecoration(
-                color: colorScheme.onSurfaceVariant.withValues(alpha: 0.3),
-                borderRadius: BorderRadius.circular(2),
+    return Material(
+      color: colorScheme.surface,
+      borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+      child: SizedBox(
+        height: MediaQuery.of(context).size.height * 0.75,
+        child: Column(
+          children: [
+            // Alça
+            Center(
+              child: Container(
+                width: 40,
+                height: 4,
+                margin: const EdgeInsets.symmetric(vertical: 12),
+                decoration: BoxDecoration(
+                  color: colorScheme.onSurfaceVariant.withValues(alpha: 0.3),
+                  borderRadius: BorderRadius.circular(2),
+                ),
               ),
             ),
-          ),
 
-          // Cabeçalho
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 0, 8, 8),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    'Fila de reprodução',
-                    style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                      color: colorScheme.onSurface,
-                    ),
-                  ),
-                ),
-                if (nextQueue.isNotEmpty)
-                  IconButton(
-                    icon: Icon(Icons.playlist_add, color: colorScheme.primary),
-                    tooltip: 'Salvar fila como playlist',
-                    onPressed: () => _saveQueueAsPlaylist(context, config),
-                  ),
-                if (nextQueue.isNotEmpty)
-                  IconButton(
-                    icon: Icon(Icons.playlist_remove, color: colorScheme.error),
-                    tooltip: 'Limpar fila',
-                    onPressed: () => _confirmClearQueue(context, config),
-                  ),
-                TextButton(
-                  onPressed: () => Navigator.pop(context),
-                  child: const Text('Fechar'),
-                ),
-              ],
-            ),
-          ),
-
-          // Banner do temporizador ativo
-          if (timer.isActive)
-            GestureDetector(
-              onTap: () => TimerBottomSheet.show(context),
-              child: Container(
-                margin: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 14,
-                  vertical: 8,
-                ),
-                decoration: BoxDecoration(
-                  color: colorScheme.primaryContainer.withValues(alpha: 0.5),
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: Row(
-                  children: [
-                    Icon(
-                      Icons.bedtime_outlined,
-                      size: 16,
-                      color: colorScheme.primary,
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        'Temporizador: ${timer.remainingLabel}',
-                        style: TextStyle(
-                          fontSize: 13,
-                          color: colorScheme.primary,
-                          fontWeight: FontWeight.w500,
-                        ),
+            // Cabeçalho
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 0, 8, 8),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      'Fila de reprodução',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                        color: colorScheme.onSurface,
                       ),
                     ),
-                    Icon(
-                      Icons.chevron_right,
-                      size: 16,
-                      color: colorScheme.primary,
+                  ),
+                  if (nextQueue.isNotEmpty)
+                    IconButton(
+                      icon: Icon(
+                        Icons.playlist_add,
+                        color: colorScheme.primary,
+                      ),
+                      tooltip: 'Salvar fila como playlist',
+                      onPressed: () => _saveQueueAsPlaylist(context, config),
                     ),
-                  ],
-                ),
+                  if (nextQueue.isNotEmpty)
+                    IconButton(
+                      icon: Icon(
+                        Icons.playlist_remove,
+                        color: colorScheme.error,
+                      ),
+                      tooltip: 'Limpar fila',
+                      onPressed: () => _confirmClearQueue(context, config),
+                    ),
+                  TextButton(
+                    onPressed: () => Navigator.pop(context),
+                    child: const Text('Fechar'),
+                  ),
+                ],
               ),
             ),
 
-          const Divider(height: 1),
-
-          // Música atual
-          if (currentTrack != null)
-            _CurrentTile(
-              track: currentTrack,
-              isPlaying: isPlaying,
-              colorScheme: colorScheme,
-              onPlayPause: config.togglePlayPause,
-            ),
-
-          if (nextQueue.isNotEmpty) const Divider(height: 1),
-
-          // Próximas músicas
-          Expanded(
-            child: nextQueue.isEmpty
-                ? Center(
-                    child: Text(
-                      currentTrack == null
-                          ? 'Fila vazia.'
-                          : 'Sem próximas músicas.',
-                      style: TextStyle(color: colorScheme.onSurfaceVariant),
-                    ),
-                  )
-                : ReorderableListView.builder(
-                    scrollController: _scrollController,
-                    padding: EdgeInsets.only(bottom: 16 + bottomInset),
-                    itemCount: nextQueue.length,
-                    onReorder: (oldIndex, newIndex) {
-                      final realOld = currentIndex + 1 + oldIndex;
-                      final realNew = currentIndex + 1 + newIndex;
-                      config.reorderQueue(realOld, realNew);
-                    },
-                    itemBuilder: (context, index) {
-                      final realIndex = currentIndex + 1 + index;
-                      final track = trackById(nextQueue[index]);
-                      if (track == null) {
-                        return const SizedBox.shrink(key: ValueKey(-1));
-                      }
-
-                      return Dismissible(
-                        key: ValueKey('${track.id}_$realIndex'),
-                        direction: DismissDirection.endToStart,
-                        background: Container(
-                          alignment: Alignment.centerRight,
-                          padding: const EdgeInsets.only(right: 20),
-                          color: colorScheme.error,
-                          child: Icon(
-                            Icons.delete_outline,
-                            color: colorScheme.onError,
+            // Banner do temporizador ativo
+            if (timer.isActive)
+              GestureDetector(
+                onTap: () => TimerBottomSheet.show(context),
+                child: Container(
+                  margin: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 8,
+                  ),
+                  decoration: BoxDecoration(
+                    color: colorScheme.primaryContainer.withValues(alpha: 0.5),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.bedtime_outlined,
+                        size: 16,
+                        color: colorScheme.primary,
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'Temporizador: ${timer.remainingLabel}',
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: colorScheme.primary,
+                            fontWeight: FontWeight.w500,
                           ),
                         ),
-                        onDismissed: (_) => config.removeFromQueue(realIndex),
-                        child: ListTile(
-                          key: ValueKey('tile_${track.id}_$realIndex'),
-                          contentPadding: const EdgeInsets.only(
-                            left: 16,
-                            right: 8,
-                          ),
-                          leading: CoverArtWidget(
-                            coverPath: track.coverPath,
-                            size: 44,
-                            borderRadius: BorderRadius.circular(6),
-                          ),
-                          title: Text(
-                            track.title,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                          subtitle: Text(
-                            track.artist,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                          trailing: ReorderableDragStartListener(
-                            index: index,
+                      ),
+                      Icon(
+                        Icons.chevron_right,
+                        size: 16,
+                        color: colorScheme.primary,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+
+            const Divider(height: 1),
+
+            // Música atual
+            if (currentTrack != null)
+              _CurrentTile(
+                track: currentTrack,
+                isPlaying: isPlaying,
+                colorScheme: colorScheme,
+                onPlayPause: config.togglePlayPause,
+              ),
+
+            if (nextQueue.isNotEmpty) const Divider(height: 1),
+
+            // Próximas músicas
+            Expanded(
+              child: nextQueue.isEmpty
+                  ? Center(
+                      child: Text(
+                        currentTrack == null
+                            ? 'Fila vazia.'
+                            : 'Sem próximas músicas.',
+                        style: TextStyle(color: colorScheme.onSurfaceVariant),
+                      ),
+                    )
+                  : ReorderableListView.builder(
+                      scrollController: _scrollController,
+                      padding: EdgeInsets.only(bottom: 16 + bottomInset),
+                      itemCount: nextQueue.length,
+                      onReorder: (oldIndex, newIndex) {
+                        final realOld = currentIndex + 1 + oldIndex;
+                        final realNew = currentIndex + 1 + newIndex;
+                        config.reorderQueue(realOld, realNew);
+                      },
+                      itemBuilder: (context, index) {
+                        final realIndex = currentIndex + 1 + index;
+                        final track = trackById(nextQueue[index]);
+                        if (track == null) {
+                          return const SizedBox.shrink(key: ValueKey(-1));
+                        }
+
+                        return Dismissible(
+                          key: ValueKey('${track.id}_$realIndex'),
+                          direction: DismissDirection.endToStart,
+                          background: Container(
+                            alignment: Alignment.centerRight,
+                            padding: const EdgeInsets.only(right: 20),
+                            color: colorScheme.error,
                             child: Icon(
-                              Icons.drag_handle,
-                              color: colorScheme.onSurfaceVariant,
+                              Icons.delete_outline,
+                              color: colorScheme.onError,
                             ),
                           ),
-                          onTap: () {
-                            config.jumpToQueueIndex(realIndex);
-                            Navigator.pop(context);
-                          },
-                        ),
-                      );
-                    },
-                  ),
-          ),
-        ],
+                          onDismissed: (_) => config.removeFromQueue(realIndex),
+                          child: ListTile(
+                            key: ValueKey('tile_${track.id}_$realIndex'),
+                            contentPadding: const EdgeInsets.only(
+                              left: 16,
+                              right: 8,
+                            ),
+                            leading: CoverArtWidget(
+                              coverPath: track.coverPath,
+                              size: 44,
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            title: Text(
+                              track.title,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            subtitle: Text(
+                              track.artist,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            trailing: ReorderableDragStartListener(
+                              index: index,
+                              child: Icon(
+                                Icons.drag_handle,
+                                color: colorScheme.onSurfaceVariant,
+                              ),
+                            ),
+                            onTap: () {
+                              config.jumpToQueueIndex(realIndex);
+                              Navigator.pop(context);
+                            },
+                          ),
+                        );
+                      },
+                    ),
+            ),
+          ],
+        ),
       ),
     );
   }

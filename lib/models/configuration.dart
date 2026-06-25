@@ -1,12 +1,13 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:math';
 
-import 'package:audio_service/audio_service.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:just_audio/just_audio.dart';
+import 'package:mpv_audio_kit/mpv_audio_kit.dart' hide Playlist;
 import 'package:music_wave_player/data/music_database.dart';
+import 'package:music_wave_player/services/music_audio_handler.dart';
 import 'package:music_wave_player/models/music_track.dart';
 import 'package:music_wave_player/models/playlist.dart';
 import 'package:music_wave_player/services/cover_art_service.dart';
@@ -98,14 +99,10 @@ Future<MusicTrack> _extractMetadata(String path) async {
     }
   } catch (_) {}
 
-  final coverPath = await CoverArtService.extractAndSave(path);
-  return MusicTrack(
-    path: path,
-    title: title,
-    artist: artist,
-    album: album,
-    coverPath: coverPath,
-  );
+  // CoverArtService não é chamado aqui pois getTemporaryDirectory()
+  // não funciona corretamente em isolates no Android.
+  // A extração de capa ocorre na thread principal após o compute().
+  return MusicTrack(path: path, title: title, artist: artist, album: album);
 }
 
 String _cleanFilename(String path) {
@@ -279,7 +276,7 @@ class Configuration with ChangeNotifier, DiagnosticableTreeMixin {
   int _currentQueueIndex = -1;
   int _currentPositionMs = 0;
   int _trackDurationMs = 0;
-  AudioHandler? _audioHandler;
+  MusicAudioHandler? _audioHandler;
   bool _isLoading = true;
   List<int> _recentlyPlayedIds = [];
 
@@ -287,6 +284,8 @@ class Configuration with ChangeNotifier, DiagnosticableTreeMixin {
   SortOption _sortPlaylists = SortOption.titleAsc;
   SortOption _sortAlbums = SortOption.titleAsc;
   SortOption _sortArtists = SortOption.titleAsc;
+
+  double _playbackSpeed = 1.0;
 
   static const _safChannel = MethodChannel(
     'br.com.hematsu.music_wave_player/saf',
@@ -299,6 +298,7 @@ class Configuration with ChangeNotifier, DiagnosticableTreeMixin {
   SortOption get sortPlaylists => _sortPlaylists;
   SortOption get sortAlbums => _sortAlbums;
   SortOption get sortArtists => _sortArtists;
+  double get playbackSpeed => _playbackSpeed;
 
   Future<void> loadFromStorageAsync() async {
     try {
@@ -330,9 +330,7 @@ class Configuration with ChangeNotifier, DiagnosticableTreeMixin {
       );
       await loadIndexedTracks();
       if (_lastPlayedMusicId != null && currentTrackPath != null) {
-        await _audioHandler?.customAction('loadTrack', {
-          'path': currentTrackPath,
-        });
+        await _audioHandler?.loadTrack(currentTrackPath!);
       }
     } finally {
       _isLoading = false;
@@ -355,7 +353,7 @@ class Configuration with ChangeNotifier, DiagnosticableTreeMixin {
   int get currentPositionMs => _currentPositionMs;
   int get trackDurationMs => _trackDurationMs;
   String? get currentTrackPath => currentTrack?.path;
-  AudioHandler? get audioHandler => _audioHandler;
+  MusicAudioHandler? get audioHandler => _audioHandler;
 
   List<MusicTrack> get recentlyPlayedTracks => _recentlyPlayedIds
       .map((id) {
@@ -385,7 +383,7 @@ class Configuration with ChangeNotifier, DiagnosticableTreeMixin {
     _saveRootDirectory(path);
   }
 
-  set audioHandler(AudioHandler handler) => _audioHandler = handler;
+  set audioHandler(MusicAudioHandler handler) => _audioHandler = handler;
   set lastSeekPositionMs(int ms) => _lastSeekPositionMs = ms;
 
   // ── Ordenação ─────────────────────────────────────────────────────────────
@@ -416,6 +414,14 @@ class Configuration with ChangeNotifier, DiagnosticableTreeMixin {
     notifyListeners();
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_kSortArtistsKey, option.key);
+  }
+
+  // ── Velocidade de reprodução ──────────────────────────────────────────────
+
+  void setPlaybackSpeed(double speed) {
+    _playbackSpeed = speed;
+    _audioHandler?.setSpeed(speed);
+    notifyListeners();
   }
 
   List<MusicTrack> applySortToTracks(
@@ -644,7 +650,7 @@ class Configuration with ChangeNotifier, DiagnosticableTreeMixin {
 
   // ── Playlist ──────────────────────────────────────────────────────────────
 
-  void playPlaylist(Playlist playlist) {
+  Future<void> playPlaylist(Playlist playlist) async {
     if (playlist.trackIds.isEmpty) return;
     final validIds = playlist.trackIds
         .where((id) => _indexedTracks.any((t) => t.id == id))
@@ -656,13 +662,13 @@ class Configuration with ChangeNotifier, DiagnosticableTreeMixin {
     _lastSeekPositionMs = 0;
     _currentPositionMs = 0;
     _trackDurationMs = 0;
-    _audioHandler?.customAction('loadTrack', {'path': currentTrackPath});
+    await _audioHandler?.loadTrack(currentTrackPath!);
     _isPlaying = true;
     notifyListeners();
     _audioHandler?.play();
   }
 
-  void playTracks(List<MusicTrack> tracks) {
+  Future<void> playTracks(List<MusicTrack> tracks) async {
     if (tracks.isEmpty) return;
     final visibleIds = tracks
         .where((t) => !t.isHidden)
@@ -675,7 +681,7 @@ class Configuration with ChangeNotifier, DiagnosticableTreeMixin {
     _lastSeekPositionMs = 0;
     _currentPositionMs = 0;
     _trackDurationMs = 0;
-    _audioHandler?.customAction('loadTrack', {'path': currentTrackPath});
+    await _audioHandler?.loadTrack(currentTrackPath!);
     _isPlaying = true;
     notifyListeners();
     _audioHandler?.play();
@@ -744,7 +750,7 @@ class Configuration with ChangeNotifier, DiagnosticableTreeMixin {
       notifyListeners();
     }
     if (_lastPlayedMusicId == track.id) {
-      await _audioHandler?.customAction('loadTrack', {'path': track.path});
+      await _audioHandler?.loadTrack(track.path);
     }
     if (context.mounted)
       _showSnack(context, 'Informações salvas com sucesso!', isSuccess: true);
@@ -842,16 +848,45 @@ class Configuration with ChangeNotifier, DiagnosticableTreeMixin {
         notifyListeners();
       }
 
-      final player = AudioPlayer();
+      // Lê duração de cada faixa usando o player MPV já inicializado
+      final durationPlayer = Player(
+        configuration: const PlayerConfiguration(autoPlay: false),
+      );
       for (int i = 0; i < allTracks.length; i++) {
         try {
-          final duration = await player.setFilePath(allTracks[i].path);
+          final completer = Completer<Duration>();
+          final sub = durationPlayer.stream.duration.listen((d) {
+            if (d > Duration.zero && !completer.isCompleted) {
+              completer.complete(d);
+            }
+          });
+          await durationPlayer.open(
+            Media('file://${allTracks[i].path}'),
+            play: false,
+          );
+          final duration = await completer.future.timeout(
+            const Duration(seconds: 3),
+            onTimeout: () => Duration.zero,
+          );
+          await sub.cancel();
           allTracks[i] = allTracks[i].copyWith(
-            durationMs: duration?.inMilliseconds ?? 0,
+            durationMs: duration.inMilliseconds,
           );
         } catch (_) {}
       }
-      await player.dispose();
+      await durationPlayer.dispose();
+
+      // Extrai capas na thread principal (getTemporaryDirectory não funciona em isolates)
+      for (int i = 0; i < allTracks.length; i++) {
+        try {
+          final coverPath = await CoverArtService.extractAndSave(
+            allTracks[i].path,
+          );
+          if (coverPath != null) {
+            allTracks[i] = allTracks[i].copyWith(coverPath: coverPath);
+          }
+        } catch (_) {}
+      }
 
       _indexedTracks = await MusicDatabase.instance.insertTracks(allTracks);
       _indexedFileCount = _indexedTracks.length;
@@ -885,7 +920,7 @@ class Configuration with ChangeNotifier, DiagnosticableTreeMixin {
       _lastSeekPositionMs = 0;
       _currentPositionMs = 0;
       _trackDurationMs = 0;
-      _audioHandler?.customAction('loadTrack', {'path': currentTrackPath});
+      await _audioHandler?.loadTrack(currentTrackPath!);
     }
     _isPlaying = true;
     notifyListeners();
@@ -901,8 +936,9 @@ class Configuration with ChangeNotifier, DiagnosticableTreeMixin {
         _saveLastPlayedMusicId(id);
         _isPlaying = true;
         notifyListeners();
-        _audioHandler?.customAction('loadTrack', {'path': currentTrackPath});
-        _audioHandler?.play();
+        _audioHandler?.loadTrack(currentTrackPath!).then((_) {
+          _audioHandler?.play();
+        });
       }
       return;
     }
@@ -910,7 +946,14 @@ class Configuration with ChangeNotifier, DiagnosticableTreeMixin {
       _isPlaying = !_isPlaying;
       notifyListeners();
       if (_isPlaying) {
-        _audioHandler?.play();
+        // Se o player completou a faixa (temporizador pausou no fim),
+        // avança para a próxima música
+        final isCompleted = _audioHandler?.player.state.completed ?? false;
+        if (isCompleted) {
+          playNextTrack();
+        } else {
+          _audioHandler?.play();
+        }
       } else {
         _saveLastSeekPosition(_currentPositionMs);
         _audioHandler?.pause();

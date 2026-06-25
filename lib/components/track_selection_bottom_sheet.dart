@@ -60,119 +60,119 @@ class _TrackSelectionBottomSheetState extends State<TrackSelectionBottomSheet> {
     final colorScheme = Theme.of(context).colorScheme;
     final bottomInset = MediaQuery.of(context).padding.bottom;
 
-    return Container(
-      height: MediaQuery.of(context).size.height * 0.85,
-      decoration: BoxDecoration(
-        color: colorScheme.surface,
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-      ),
-      child: Column(
-        children: [
-          // Alça
-          Center(
-            child: Container(
-              width: 40,
-              height: 4,
-              margin: const EdgeInsets.symmetric(vertical: 12),
-              decoration: BoxDecoration(
-                color: colorScheme.onSurfaceVariant.withValues(alpha: 0.3),
-                borderRadius: BorderRadius.circular(2),
+    return Material(
+      color: colorScheme.surface,
+      borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+      child: SizedBox(
+        height: MediaQuery.of(context).size.height * 0.85,
+        child: Column(
+          children: [
+            // Alça
+            Center(
+              child: Container(
+                width: 40,
+                height: 4,
+                margin: const EdgeInsets.symmetric(vertical: 12),
+                decoration: BoxDecoration(
+                  color: colorScheme.onSurfaceVariant.withValues(alpha: 0.3),
+                  borderRadius: BorderRadius.circular(2),
+                ),
               ),
             ),
-          ),
-          // Cabeçalho
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    widget.title,
-                    style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                      color: colorScheme.onSurface,
-                    ),
-                  ),
-                ),
-                Text(
-                  '${_selected.length} selecionada${_selected.length == 1 ? '' : 's'}',
-                  style: TextStyle(fontSize: 13, color: colorScheme.primary),
-                ),
-              ],
-            ),
-          ),
-          const Divider(height: 1),
-          // Lista
-          Expanded(
-            child: ListView.builder(
-              itemCount: widget.tracks.length,
-              itemBuilder: (context, index) {
-                final track = widget.tracks[index];
-                final isSelected = _selected.contains(track.id);
-                return ListTile(
-                  leading: CoverArtWidget(
-                    coverPath: track.coverPath,
-                    size: 44,
-                    borderRadius: BorderRadius.circular(6),
-                  ),
-                  title: Text(
-                    track.title,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  subtitle: Text(
-                    track.artist,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  trailing: Checkbox(
-                    value: isSelected,
-                    onChanged: (_) => _toggle(track.id!),
-                    activeColor: colorScheme.primary,
-                  ),
-                  onTap: () => _toggle(track.id!),
-                );
-              },
-            ),
-          ),
-          const Divider(height: 1),
-          // Botões
-          Padding(
-            padding: EdgeInsets.fromLTRB(20, 12, 20, 16 + bottomInset),
-            child: Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton(
-                    onPressed: () => Navigator.pop(context),
-                    style: OutlinedButton.styleFrom(
-                      minimumSize: const Size.fromHeight(48),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
+            // Cabeçalho
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      widget.title,
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                        color: colorScheme.onSurface,
                       ),
                     ),
-                    child: const Text('Cancelar'),
                   ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: FilledButton(
-                    onPressed: _selected.isEmpty
-                        ? null
-                        : () => Navigator.pop(context, _selected.toList()),
-                    style: FilledButton.styleFrom(
-                      minimumSize: const Size.fromHeight(48),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                    ),
-                    child: const Text('Confirmar'),
+                  Text(
+                    '${_selected.length} selecionada${_selected.length == 1 ? '' : 's'}',
+                    style: TextStyle(fontSize: 13, color: colorScheme.primary),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
-          ),
-        ],
+            const Divider(height: 1),
+            // Lista
+            Expanded(
+              child: ListView.builder(
+                itemCount: widget.tracks.length,
+                itemBuilder: (context, index) {
+                  final track = widget.tracks[index];
+                  final isSelected = _selected.contains(track.id);
+                  return ListTile(
+                    leading: CoverArtWidget(
+                      coverPath: track.coverPath,
+                      size: 44,
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    title: Text(
+                      track.title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    subtitle: Text(
+                      track.artist,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    trailing: Checkbox(
+                      value: isSelected,
+                      onChanged: (_) => _toggle(track.id!),
+                      activeColor: colorScheme.primary,
+                    ),
+                    onTap: () => _toggle(track.id!),
+                  );
+                },
+              ),
+            ),
+            const Divider(height: 1),
+            // Botões
+            Padding(
+              padding: EdgeInsets.fromLTRB(20, 12, 20, 16 + bottomInset),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () => Navigator.pop(context),
+                      style: OutlinedButton.styleFrom(
+                        minimumSize: const Size.fromHeight(48),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                      child: const Text('Cancelar'),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: FilledButton(
+                      onPressed: _selected.isEmpty
+                          ? null
+                          : () => Navigator.pop(context, _selected.toList()),
+                      style: FilledButton.styleFrom(
+                        minimumSize: const Size.fromHeight(48),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                      child: const Text('Confirmar'),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

@@ -1,18 +1,21 @@
 import 'dart:async';
-import 'dart:io';
 
-import 'package:audio_service/audio_service.dart';
-import 'package:flutter/foundation.dart';
-import 'package:just_audio/just_audio.dart';
+import 'package:mpv_audio_kit/mpv_audio_kit.dart';
 import 'package:music_wave_player/data/play_session_database.dart';
 import 'package:music_wave_player/models/configuration.dart';
 import 'package:music_wave_player/services/timer_service.dart';
-import 'package:rxdart/rxdart.dart';
 
-class MusicAudioHandler extends BaseAudioHandler with SeekHandler {
-  final AudioPlayer _player = AudioPlayer();
+class MusicAudioHandler {
   final Configuration _config;
   SleepTimerService? _timerService;
+
+  late final Player player;
+
+  StreamSubscription? _positionSub;
+  StreamSubscription? _playingSub;
+  StreamSubscription? _completedSub;
+  StreamSubscription? _durationSub;
+  StreamSubscription? _mediaCommandSub;
 
   Timer? _periodicSaveTimer;
 
@@ -22,76 +25,136 @@ class MusicAudioHandler extends BaseAudioHandler with SeekHandler {
   DateTime? _sessionStartedAt;
 
   MusicAudioHandler(this._config) {
-    _emitIdleState();
-    _initPlayerListeners();
+    MpvAudioKit.ensureInitialized();
+    player = Player(
+      configuration: const PlayerConfiguration(
+        autoPlay: false,
+        logLevel: LogLevel.warn,
+      ),
+    );
+    _initListeners();
   }
 
-  /// Injeta o SleepTimerService após a criação (evita dependência circular).
   void setTimerService(SleepTimerService timerService) {
     _timerService = timerService;
   }
 
-  void _emitIdleState() {
-    playbackState.add(
-      PlaybackState(
-        controls: [
-          MediaControl.skipToPrevious,
-          MediaControl.play,
-          MediaControl.skipToNext,
-        ],
-        systemActions: const {
-          MediaAction.seek,
-          MediaAction.skipToPrevious,
-          MediaAction.skipToNext,
-        },
-        androidCompactActionIndices: const [0, 1, 2],
-        processingState: AudioProcessingState.idle,
-        playing: false,
-      ),
-    );
+  void _initListeners() {
+    // Posição e duração
+    _positionSub = player.stream.position.listen((pos) {
+      _config.updateCurrentPosition(pos.inMilliseconds);
+    });
+
+    _durationSub = player.stream.duration.listen((dur) {
+      if (dur > Duration.zero) {
+        _config.updateTrackDuration(dur.inMilliseconds);
+      }
+    });
+
+    // Estado de reprodução
+    _playingSub = player.stream.playing.listen((playing) {
+      if (playing) {
+        _resumeSession();
+        _startPeriodicSave();
+      } else {
+        _pauseSession();
+        _stopPeriodicSave();
+      }
+      _config.syncPlayingState(playing);
+    });
+
+    // Fim de faixa
+    _completedSub = player.stream.completed.listen((completed) {
+      if (!completed) return;
+
+      final shouldPause = _timerService?.onTrackFinished() ?? false;
+      if (shouldPause) {
+        player.pause();
+        return;
+      }
+      _config.trackDidFinish();
+    });
+
+    // Comandos da notificação/tela de bloqueio
+    _mediaCommandSub = player.stream.mediaSessionCommands.listen((command) {
+      switch (command) {
+        case MediaSessionCommandNext():
+          skipToNext();
+        case MediaSessionCommandPrevious():
+          skipToPrevious();
+        case MediaSessionCommandSeekTo(:final position):
+          seek(position);
+        default:
+          break;
+      }
+    });
   }
 
-  void _initPlayerListeners() {
-    Rx.combineLatest2<Duration, Duration?, _MediaState>(
-      _player.positionStream,
-      _player.durationStream,
-      (pos, dur) => _MediaState(pos, dur ?? Duration.zero),
-    ).throttleTime(const Duration(milliseconds: 250)).listen((s) {
-      _config.updateCurrentPosition(s.position.inMilliseconds);
-      _config.updateTrackDuration(s.duration.inMilliseconds);
+  // ── Controles de reprodução ───────────────────────────────────────────────
+
+  Future<void> loadTrack(String path) async {
+    await _flushSession();
+
+    final track = _config.currentTrack;
+    if (track?.id != null) _startSession(track!.id!);
+
+    final uri = 'file://$path';
+
+    // Aguarda o MPV carregar o arquivo e expor a duração antes de retornar,
+    // garantindo que play() seja chamado depois que o player está pronto.
+    final completer = Completer<void>();
+    StreamSubscription? sub;
+    sub = player.stream.duration.listen((d) {
+      if (d > Duration.zero && !completer.isCompleted) {
+        completer.complete();
+        sub?.cancel();
+      }
     });
 
-    _player.playerStateStream.listen((state) {
-      if (state.processingState == ProcessingState.completed) {
-        // Verifica se o timer deve pausar antes de avançar
-        final shouldPause = _timerService?.onTrackFinished() ?? false;
-        if (shouldPause) {
-          _player.pause();
-          return;
-        }
-        _config.trackDidFinish();
-      }
+    await player.open(Media(uri), play: false);
 
-      final isActuallyPlaying =
-          state.playing && state.processingState != ProcessingState.completed;
+    await completer.future.timeout(
+      const Duration(seconds: 5),
+      onTimeout: () {
+        sub?.cancel();
+      },
+    );
 
-      final isTransitioning =
-          state.processingState == ProcessingState.loading ||
-          state.processingState == ProcessingState.buffering;
+    await player.setMediaSession(const MediaSession());
 
-      if (!isTransitioning) {
-        if (isActuallyPlaying) {
-          _resumeSession();
-          _startPeriodicSave();
-        } else {
-          _pauseSession();
-          _stopPeriodicSave();
-        }
-      }
+    if (_config.playbackSpeed != 1.0) {
+      await player.setRate(_config.playbackSpeed);
+    }
 
-      _config.syncPlayingState(isActuallyPlaying);
-      _pushPlaybackState(state);
-    });
+    if (_config.lastSeekPositionMs > 0) {
+      await player.seek(Duration(milliseconds: _config.lastSeekPositionMs));
+      _config.lastSeekPositionMs = 0;
+    }
+
+    // Força atualização da duração e posição no config após carregamento
+    _config.updateTrackDuration(player.state.duration.inMilliseconds);
+    _config.updateCurrentPosition(player.state.position.inMilliseconds);
+  }
+
+  Future<void> play() => player.play();
+
+  Future<void> pause() => player.pause();
+
+  Future<void> seek(Duration position) => player.seek(position);
+
+  Future<void> setSpeed(double speed) => player.setRate(speed);
+
+  Future<void> skipToNext() async => _config.playNextTrack();
+
+  Future<void> skipToPrevious() async => _config.playPreviousTrack();
+
+  Future<void> stop() async {
+    _stopPeriodicSave();
+    await _flushSession();
+    await _config.saveCurrentPositionForResume(
+      player.state.position.inMilliseconds,
+    );
+    await player.stop();
   }
 
   // ── Sessão de reprodução ──────────────────────────────────────────────────
@@ -108,12 +171,10 @@ class MusicAudioHandler extends BaseAudioHandler with SeekHandler {
 
   void _pauseSession() {
     if (_sessionStartedAt == null) return;
-
     final sinceResume = DateTime.now()
         .difference(_sessionStartedAt!)
         .inMilliseconds;
     if (sinceResume < 1000) return;
-
     final elapsed = DateTime.now().difference(_sessionStartedAt!).inSeconds;
     _sessionSecondsAccumulated += elapsed;
     _sessionStartedAt = null;
@@ -128,17 +189,12 @@ class MusicAudioHandler extends BaseAudioHandler with SeekHandler {
 
   Future<void> _saveSessionDelta() async {
     if (_sessionTrackId == null) return;
-
-    int currentAccumulated = _sessionSecondsAccumulated;
+    int current = _sessionSecondsAccumulated;
     if (_sessionStartedAt != null) {
-      currentAccumulated += DateTime.now()
-          .difference(_sessionStartedAt!)
-          .inSeconds;
+      current += DateTime.now().difference(_sessionStartedAt!).inSeconds;
     }
-
-    final delta = currentAccumulated - _sessionSecondsSaved;
+    final delta = current - _sessionSecondsSaved;
     if (delta <= 0) return;
-
     await PlaySessionDatabase.instance.insertSession(
       trackId: _sessionTrackId!,
       secondsPlayed: delta,
@@ -171,7 +227,7 @@ class MusicAudioHandler extends BaseAudioHandler with SeekHandler {
       _,
     ) async {
       await _config.saveCurrentPositionForResume(
-        _player.position.inMilliseconds,
+        player.state.position.inMilliseconds,
       );
       await _saveSessionDelta();
     });
@@ -182,130 +238,16 @@ class MusicAudioHandler extends BaseAudioHandler with SeekHandler {
     _periodicSaveTimer = null;
   }
 
-  // ── Playback state ────────────────────────────────────────────────────────
+  // ── Dispose ───────────────────────────────────────────────────────────────
 
-  void _pushPlaybackState(PlayerState state) {
-    final playing =
-        state.playing && state.processingState != ProcessingState.completed;
-
-    playbackState.add(
-      PlaybackState(
-        controls: [
-          MediaControl.skipToPrevious,
-          if (playing) MediaControl.pause else MediaControl.play,
-          MediaControl.skipToNext,
-        ],
-        systemActions: const {
-          MediaAction.seek,
-          MediaAction.seekForward,
-          MediaAction.seekBackward,
-          MediaAction.skipToPrevious,
-          MediaAction.skipToNext,
-        },
-        androidCompactActionIndices: const [0, 1, 2],
-        processingState: _toServiceState(state.processingState),
-        playing: playing,
-        updatePosition: _player.position,
-        bufferedPosition: _player.bufferedPosition,
-        speed: _player.speed,
-      ),
-    );
-  }
-
-  AudioProcessingState _toServiceState(ProcessingState s) => switch (s) {
-    ProcessingState.idle => AudioProcessingState.idle,
-    ProcessingState.loading => AudioProcessingState.loading,
-    ProcessingState.buffering => AudioProcessingState.buffering,
-    ProcessingState.ready => AudioProcessingState.ready,
-    ProcessingState.completed => AudioProcessingState.completed,
-  };
-
-  // ── Overrides ─────────────────────────────────────────────────────────────
-
-  @override
-  Future<dynamic> customAction(
-    String name, [
-    Map<String, dynamic>? extras,
-  ]) async {
-    if (name == 'loadTrack') {
-      final path = extras!['path'] as String;
-      if (kDebugMode) print('AudioHandler: loadTrack → $path');
-
-      await _flushSession();
-
-      final track = _config.currentTrack;
-
-      if (track?.id != null) _startSession(track!.id!);
-
-      Uri? artUri;
-      if (track?.coverPath != null) {
-        final coverFile = File(track!.coverPath!);
-        if (await coverFile.exists()) {
-          artUri = coverFile.uri;
-        }
-      }
-
-      mediaItem.add(
-        MediaItem(
-          id: path,
-          title: track?.title ?? 'Título Desconhecido',
-          artist: track?.artist ?? 'Artista Desconhecido',
-          album: track?.album ?? 'Álbum Desconhecido',
-          artUri: artUri,
-        ),
-      );
-
-      await _player.setFilePath(path);
-
-      final duration = _player.duration;
-      if (duration != null && duration.inMilliseconds > 0) {
-        mediaItem.add(mediaItem.value!.copyWith(duration: duration));
-      } else {
-        _player.durationStream
-            .where((d) => d != null && d.inMilliseconds > 0)
-            .take(1)
-            .timeout(const Duration(seconds: 2), onTimeout: (_) {})
-            .listen((d) {
-              if (d != null && mediaItem.value != null) {
-                mediaItem.add(mediaItem.value!.copyWith(duration: d));
-              }
-            });
-      }
-
-      if (_config.lastSeekPositionMs > 0) {
-        await _player.seek(Duration(milliseconds: _config.lastSeekPositionMs));
-        _config.lastSeekPositionMs = 0;
-      }
-    }
-  }
-
-  @override
-  Future<void> play() => _player.play();
-
-  @override
-  Future<void> pause() => _player.pause();
-
-  @override
-  Future<void> seek(Duration position) => _player.seek(position);
-
-  @override
-  Future<void> skipToNext() async => _config.playNextTrack();
-
-  @override
-  Future<void> skipToPrevious() async => _config.playPreviousTrack();
-
-  @override
-  Future<void> stop() async {
+  Future<void> dispose() async {
     _stopPeriodicSave();
     await _flushSession();
-    await _config.saveCurrentPositionForResume(_player.position.inMilliseconds);
-    await _player.stop();
-    await super.stop();
+    await _positionSub?.cancel();
+    await _playingSub?.cancel();
+    await _completedSub?.cancel();
+    await _durationSub?.cancel();
+    await _mediaCommandSub?.cancel();
+    await player.dispose();
   }
-}
-
-class _MediaState {
-  final Duration position;
-  final Duration duration;
-  _MediaState(this.position, this.duration);
 }
