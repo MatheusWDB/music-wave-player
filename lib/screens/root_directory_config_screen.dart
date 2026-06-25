@@ -1,7 +1,7 @@
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
-import 'package:music_wave_player/components/root_directory_config_components/indexing_component.dart';
-import 'package:music_wave_player/components/root_directory_config_components/path_component.dart';
+import 'package:music_wave_player/components/indexing_component.dart';
+import 'package:music_wave_player/components/path_component.dart';
 import 'package:music_wave_player/models/configuration.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:provider/provider.dart';
