@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:mpv_audio_kit/mpv_audio_kit.dart';
 import 'package:music_wave_player/data/play_session_database.dart';
 import 'package:music_wave_player/models/configuration.dart';
@@ -10,6 +11,18 @@ class MusicAudioHandler {
   SleepTimerService? _timerService;
 
   late final Player player;
+
+  // ── Crossfade / fade ──────────────────────────────────────────────────────
+  int _crossfadeDuration = 0;
+  bool _fadeOnPauseResume = false;
+
+  Timer? _crossfadeTimer;
+  bool _crossfadeInProgress = false;
+  // Evita disparar o fade out de fim de faixa mais de uma vez por faixa
+  bool _endOfTrackFadeStarted = false;
+
+  // Volume base — separado do volume do sistema
+  final double _baseVolume = 100.0;
 
   StreamSubscription? _positionSub;
   StreamSubscription? _playingSub;
@@ -33,16 +46,112 @@ class MusicAudioHandler {
       ),
     );
     _initListeners();
+    _applyGapless();
+  }
+
+  Future<void> _applyGapless() async {
+    await player.setGapless(Gapless.yes);
+    await player.setPrefetchPlaylist(true);
+    // Registra a MediaSession imediatamente para que os controles
+    // da notificação persistam mesmo antes de uma faixa ser carregada.
+    await player.setMediaSession(const MediaSession());
   }
 
   void setTimerService(SleepTimerService timerService) {
     _timerService = timerService;
   }
 
+  void updateCrossfade(int durationSeconds) {
+    _crossfadeDuration = durationSeconds;
+  }
+
+  void updateFadeOnPauseResume(bool enabled) {
+    _fadeOnPauseResume = enabled;
+  }
+
+  // ── Lógica de fade ────────────────────────────────────────────────────────
+
+  /// Fade out verdadeiramente awaitable via Completer interno.
+  /// Só completa quando o volume chega a 0.
+  Future<void> _fadeOut(int durationSeconds) async {
+    _crossfadeTimer?.cancel();
+    _crossfadeInProgress = true;
+
+    final completer = Completer<void>();
+    const steps = 20;
+    final stepMs = (durationSeconds * 1000) ~/ steps;
+    final volumeStep = _baseVolume / steps;
+    double current = _baseVolume;
+
+    _crossfadeTimer = Timer.periodic(Duration(milliseconds: stepMs), (t) async {
+      current -= volumeStep;
+      if (current <= 0) {
+        current = 0;
+        t.cancel();
+        await player.setVolume(0);
+        _crossfadeInProgress = false;
+        if (!completer.isCompleted) completer.complete();
+      } else {
+        await player.setVolume(current);
+      }
+    });
+
+    await completer.future;
+  }
+
+  /// Fade in de 0 até [_baseVolume] ao longo de [durationSeconds].
+  Future<void> _fadeIn(int durationSeconds) async {
+    _crossfadeTimer?.cancel();
+    _crossfadeInProgress = true;
+    await player.setVolume(0);
+
+    const steps = 20;
+    final stepMs = (durationSeconds * 1000) ~/ steps;
+    final volumeStep = _baseVolume / steps;
+    double current = 0;
+
+    _crossfadeTimer = Timer.periodic(Duration(milliseconds: stepMs), (t) async {
+      current += volumeStep;
+      if (current >= _baseVolume) {
+        current = _baseVolume;
+        t.cancel();
+        await player.setVolume(_baseVolume);
+        _crossfadeInProgress = false;
+      } else {
+        await player.setVolume(current);
+      }
+    });
+    // Não awaita — o fade in corre em paralelo com a reprodução
+  }
+
+  /// Fade out e executa [callback] ao terminar.
+  /// Usado pelo trackDidFinish para crossfade no fim natural da faixa.
+  Future<void> fadeOutThenCall(VoidCallback callback) async {
+    if (_crossfadeDuration > 0) {
+      await _fadeOut(_crossfadeDuration);
+    }
+    callback();
+  }
+
   void _initListeners() {
-    // Posição e duração
     _positionSub = player.stream.position.listen((pos) {
       _config.updateCurrentPosition(pos.inMilliseconds);
+
+      // Dispara fade out nos últimos X segundos da faixa atual
+      if (_crossfadeDuration > 0 &&
+          !_endOfTrackFadeStarted &&
+          !_crossfadeInProgress &&
+          player.state.playing) {
+        final duration = player.state.duration;
+        if (duration > Duration.zero) {
+          final remaining = duration - pos;
+          if (remaining.inSeconds <= _crossfadeDuration &&
+              remaining.inSeconds > 0) {
+            _endOfTrackFadeStarted = true;
+            _fadeOut(_crossfadeDuration);
+          }
+        }
+      }
     });
 
     _durationSub = player.stream.duration.listen((dur) {
@@ -51,7 +160,6 @@ class MusicAudioHandler {
       }
     });
 
-    // Estado de reprodução
     _playingSub = player.stream.playing.listen((playing) {
       if (playing) {
         _resumeSession();
@@ -63,7 +171,8 @@ class MusicAudioHandler {
       _config.syncPlayingState(playing);
     });
 
-    // Fim de faixa
+    // Quando a faixa termina naturalmente, o fade out já foi feito pelo
+    // listener de posição — só avança para a próxima.
     _completedSub = player.stream.completed.listen((completed) {
       if (!completed) return;
 
@@ -75,7 +184,6 @@ class MusicAudioHandler {
       _config.trackDidFinish();
     });
 
-    // Comandos da notificação/tela de bloqueio
     _mediaCommandSub = player.stream.mediaSessionCommands.listen((command) {
       switch (command) {
         case MediaSessionCommandNext():
@@ -93,6 +201,11 @@ class MusicAudioHandler {
   // ── Controles de reprodução ───────────────────────────────────────────────
 
   Future<void> loadTrack(String path) async {
+    // Cancela qualquer fade em andamento e reseta flags para a nova faixa
+    _crossfadeTimer?.cancel();
+    _crossfadeInProgress = false;
+    _endOfTrackFadeStarted = false;
+
     await _flushSession();
 
     final track = _config.currentTrack;
@@ -100,8 +213,6 @@ class MusicAudioHandler {
 
     final uri = 'file://$path';
 
-    // Aguarda o MPV carregar o arquivo e expor a duração antes de retornar,
-    // garantindo que play() seja chamado depois que o player está pronto.
     final completer = Completer<void>();
     StreamSubscription? sub;
     sub = player.stream.duration.listen((d) {
@@ -131,14 +242,42 @@ class MusicAudioHandler {
       _config.lastSeekPositionMs = 0;
     }
 
-    // Força atualização da duração e posição no config após carregamento
     _config.updateTrackDuration(player.state.duration.inMilliseconds);
     _config.updateCurrentPosition(player.state.position.inMilliseconds);
+
+    // Prepara volume 0 se crossfade ativo — o fade in acontece no play()
+    if (_crossfadeDuration > 0) {
+      await player.setVolume(0);
+    } else {
+      await player.setVolume(_baseVolume);
+    }
   }
 
-  Future<void> play() => player.play();
+  Future<void> play() async {
+    if (_fadeOnPauseResume && !_crossfadeInProgress) {
+      // Fade ao retomar: zera volume, toca, sobe gradualmente
+      await player.setVolume(0);
+      await player.play();
+      _fadeIn(1);
+    } else if (_crossfadeDuration > 0 && player.state.volume < 1) {
+      // Crossfade: faixa nova já está com volume 0, sobe após play
+      await player.play();
+      _fadeIn(_crossfadeDuration);
+    } else {
+      await player.setVolume(_baseVolume);
+      await player.play();
+    }
+  }
 
-  Future<void> pause() => player.pause();
+  Future<void> pause() async {
+    if (_fadeOnPauseResume && !_crossfadeInProgress) {
+      await _fadeOut(1);
+      await player.pause();
+      await player.setVolume(_baseVolume);
+    } else {
+      await player.pause();
+    }
+  }
 
   Future<void> seek(Duration position) => player.seek(position);
 
@@ -149,6 +288,7 @@ class MusicAudioHandler {
   Future<void> skipToPrevious() async => _config.playPreviousTrack();
 
   Future<void> stop() async {
+    _crossfadeTimer?.cancel();
     _stopPeriodicSave();
     await _flushSession();
     await _config.saveCurrentPositionForResume(
@@ -241,6 +381,7 @@ class MusicAudioHandler {
   // ── Dispose ───────────────────────────────────────────────────────────────
 
   Future<void> dispose() async {
+    _crossfadeTimer?.cancel();
     _stopPeriodicSave();
     await _flushSession();
     await _positionSub?.cancel();

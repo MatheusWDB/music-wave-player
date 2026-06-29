@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:music_wave_player/components/mini_player_component.dart';
-import 'package:music_wave_player/components/recap_widget.dart';
 import 'package:music_wave_player/components/tabs_component.dart';
+import 'package:music_wave_player/components/audio_transitions_bottom_sheet.dart';
+import 'package:music_wave_player/components/recap_widget.dart';
 import 'package:music_wave_player/models/configuration.dart';
 import 'package:music_wave_player/screens/hidden_tracks_screen.dart';
 import 'package:music_wave_player/screens/most_played_screen.dart';
@@ -121,58 +122,75 @@ class _AppMenu extends StatelessWidget {
     return Material(
       color: colorScheme.surface,
       borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Center(
-            child: Container(
-              width: 40,
-              height: 4,
-              margin: const EdgeInsets.symmetric(vertical: 12),
-              decoration: BoxDecoration(
-                color: colorScheme.onSurfaceVariant.withValues(alpha: 0.3),
-                borderRadius: BorderRadius.circular(2),
+      child: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Center(
+              child: Container(
+                width: 40,
+                height: 4,
+                margin: const EdgeInsets.symmetric(vertical: 12),
+                decoration: BoxDecoration(
+                  color: colorScheme.onSurfaceVariant.withValues(alpha: 0.3),
+                  borderRadius: BorderRadius.circular(2),
+                ),
               ),
             ),
-          ),
-          ListTile(
-            leading: Icon(
-              Icons.library_music_outlined,
-              color: colorScheme.primary,
+            ListTile(
+              leading: Icon(
+                Icons.library_music_outlined,
+                color: colorScheme.primary,
+              ),
+              title: const Text('Biblioteca'),
+              subtitle: const Text('Configurar pasta e reindexar'),
+              onTap: () => go(const RootDirectoryConfigScreen()),
             ),
-            title: const Text('Biblioteca'),
-            subtitle: const Text('Configurar pasta e reindexar'),
-            onTap: () => go(const RootDirectoryConfigScreen()),
-          ),
-          ListTile(
-            leading: Icon(
-              Icons.visibility_off_outlined,
-              color: colorScheme.primary,
+            ListTile(
+              leading: Icon(
+                Icons.visibility_off_outlined,
+                color: colorScheme.primary,
+              ),
+              title: const Text('Músicas ocultas'),
+              subtitle: const Text('Ver e reexibir músicas ocultadas'),
+              onTap: () => go(const HiddenTracksScreen()),
             ),
-            title: const Text('Músicas ocultas'),
-            subtitle: const Text('Ver e reexibir músicas ocultadas'),
-            onTap: () => go(const HiddenTracksScreen()),
-          ),
-          ListTile(
-            leading: Icon(Icons.bar_chart_outlined, color: colorScheme.primary),
-            title: const Text('Estatísticas'),
-            subtitle: const Text('Tempo ouvido por música e artista'),
-            onTap: () => go(const StatisticsScreen()),
-          ),
-          ListTile(
-            leading: Icon(Icons.trending_up, color: colorScheme.primary),
-            title: const Text('Mais / Menos ouvidas'),
-            subtitle: const Text('Ranking de reprodução por período'),
-            onTap: () => go(const MostPlayedScreen()),
-          ),
-          ListTile(
-            leading: Icon(Icons.fiber_new_outlined, color: colorScheme.primary),
-            title: const Text('Adicionadas recentemente'),
-            subtitle: const Text('Músicas indexadas mais recentemente'),
-            onTap: () => go(const RecentlyAddedScreen()),
-          ),
-          SizedBox(height: 16 + bottomInset),
-        ],
+            ListTile(
+              leading: Icon(Icons.swap_horiz, color: colorScheme.primary),
+              title: const Text('Transições de áudio'),
+              subtitle: const Text('Crossfade e fade ao pausar'),
+              onTap: () {
+                Navigator.pop(context);
+                AudioTransitionsBottomSheet.show(context);
+              },
+            ),
+            ListTile(
+              leading: Icon(
+                Icons.bar_chart_outlined,
+                color: colorScheme.primary,
+              ),
+              title: const Text('Estatísticas'),
+              subtitle: const Text('Tempo ouvido por música e artista'),
+              onTap: () => go(const StatisticsScreen()),
+            ),
+            ListTile(
+              leading: Icon(Icons.trending_up, color: colorScheme.primary),
+              title: const Text('Mais / Menos ouvidas'),
+              subtitle: const Text('Ranking de reprodução por período'),
+              onTap: () => go(const MostPlayedScreen()),
+            ),
+            ListTile(
+              leading: Icon(
+                Icons.fiber_new_outlined,
+                color: colorScheme.primary,
+              ),
+              title: const Text('Adicionadas recentemente'),
+              subtitle: const Text('Músicas indexadas mais recentemente'),
+              onTap: () => go(const RecentlyAddedScreen()),
+            ),
+            SizedBox(height: 16 + bottomInset),
+          ],
+        ),
       ),
     );
   }

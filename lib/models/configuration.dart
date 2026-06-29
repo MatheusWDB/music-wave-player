@@ -25,6 +25,8 @@ const String _kSortMusicsKey = 'sort_musics';
 const String _kSortPlaylistsKey = 'sort_playlists';
 const String _kSortAlbumsKey = 'sort_albums';
 const String _kSortArtistsKey = 'sort_artists';
+const String _kCrossfadeDurationKey = 'crossfade_duration';
+const String _kFadeOnPauseResumeKey = 'fade_on_pause_resume';
 
 enum IndexingStatus { idle, scanning, complete, error }
 
@@ -287,6 +289,10 @@ class Configuration with ChangeNotifier, DiagnosticableTreeMixin {
 
   double _playbackSpeed = 1.0;
 
+  // 0 = desligado; valores válidos: 1, 2, 3, 5 (segundos)
+  int _crossfadeDuration = 0;
+  bool _fadeOnPauseResume = false;
+
   static const _safChannel = MethodChannel(
     'br.com.hematsu.music_wave_player/saf',
   );
@@ -299,6 +305,8 @@ class Configuration with ChangeNotifier, DiagnosticableTreeMixin {
   SortOption get sortAlbums => _sortAlbums;
   SortOption get sortArtists => _sortArtists;
   double get playbackSpeed => _playbackSpeed;
+  int get crossfadeDuration => _crossfadeDuration;
+  bool get fadeOnPauseResume => _fadeOnPauseResume;
 
   Future<void> loadFromStorageAsync() async {
     try {
@@ -328,10 +336,21 @@ class Configuration with ChangeNotifier, DiagnosticableTreeMixin {
         prefs.getString(_kSortArtistsKey) ?? '',
         SortOption.titleAsc,
       );
+      _crossfadeDuration = prefs.getInt(_kCrossfadeDurationKey) ?? 0;
+      _fadeOnPauseResume = prefs.getBool(_kFadeOnPauseResumeKey) ?? false;
       await loadIndexedTracks();
       if (_lastPlayedMusicId != null && currentTrackPath != null) {
-        await _audioHandler?.loadTrack(currentTrackPath!);
+        // Só restaura a faixa se o player não estiver tocando —
+        // evita interromper reprodução em andamento após swipe-to-kill + reabrir.
+        final isAlreadyPlaying = _audioHandler?.player.state.playing ?? false;
+        if (!isAlreadyPlaying) {
+          await _audioHandler?.loadTrack(currentTrackPath!);
+        } else {
+          _isPlaying = true;
+        }
       }
+      _audioHandler?.updateCrossfade(_crossfadeDuration);
+      _audioHandler?.updateFadeOnPauseResume(_fadeOnPauseResume);
     } finally {
       _isLoading = false;
       notifyListeners();
@@ -422,6 +441,22 @@ class Configuration with ChangeNotifier, DiagnosticableTreeMixin {
     _playbackSpeed = speed;
     _audioHandler?.setSpeed(speed);
     notifyListeners();
+  }
+
+  Future<void> setCrossfadeDuration(int seconds) async {
+    _crossfadeDuration = seconds;
+    _audioHandler?.updateCrossfade(seconds);
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(_kCrossfadeDurationKey, seconds);
+  }
+
+  Future<void> setFadeOnPauseResume(bool enabled) async {
+    _fadeOnPauseResume = enabled;
+    _audioHandler?.updateFadeOnPauseResume(enabled);
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_kFadeOnPauseResumeKey, enabled);
   }
 
   List<MusicTrack> applySortToTracks(
