@@ -1,398 +1,115 @@
-import 'dart:async';
-import 'dart:io';
-import 'dart:math';
-
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
-import 'package:mpv_audio_kit/mpv_audio_kit.dart' hide Playlist;
 import 'package:music_wave_player/data/music_database.dart';
-import 'package:music_wave_player/services/music_audio_handler.dart';
 import 'package:music_wave_player/models/music_track.dart';
 import 'package:music_wave_player/models/playlist.dart';
-import 'package:music_wave_player/services/cover_art_service.dart';
 import 'package:music_wave_player/services/favorites_service.dart';
-import 'package:music_wave_player/services/ffmpeg_service.dart';
+import 'package:music_wave_player/services/indexing_service.dart';
+import 'package:music_wave_player/services/music_audio_handler.dart';
+import 'package:music_wave_player/services/playback_controller.dart';
+import 'package:music_wave_player/services/queue_manager.dart';
 import 'package:music_wave_player/services/recently_played_service.dart';
-import 'package:music_wave_player/services/saf_service.dart';
+import 'package:music_wave_player/services/sort_service.dart';
+import 'package:music_wave_player/services/track_repository.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
+export 'package:music_wave_player/services/sort_service.dart'
+    show SortOption, SortOptionLabel;
 
 const String _kRootDirectoryKey = 'rootDirectoryPath';
 const String _kLastScanDateKey = 'lastScanDate';
 const String _kLastPlayedMusicIdKey = 'lastPlayedMusicId';
 const String _kLastSeekPositionMsKey = 'lastSeekPositionMs';
-const String _kSortMusicsKey = 'sort_musics';
-const String _kSortPlaylistsKey = 'sort_playlists';
-const String _kSortAlbumsKey = 'sort_albums';
-const String _kSortArtistsKey = 'sort_artists';
 const String _kCrossfadeDurationKey = 'crossfade_duration';
 const String _kFadeOnPauseResumeKey = 'fade_on_pause_resume';
 
 enum IndexingStatus { idle, scanning, complete, error }
 
-enum SortOption {
-  titleAsc,
-  titleDesc,
-  artistAsc,
-  artistDesc,
-  random,
-  ratingDesc,
-  ratingAsc,
-}
-
-extension SortOptionLabel on SortOption {
-  String get label => switch (this) {
-    SortOption.titleAsc => 'Título (A→Z)',
-    SortOption.titleDesc => 'Título (Z→A)',
-    SortOption.artistAsc => 'Artista (A→Z)',
-    SortOption.artistDesc => 'Artista (Z→A)',
-    SortOption.random => 'Aleatório',
-    SortOption.ratingDesc => 'Melhor avaliadas',
-    SortOption.ratingAsc => 'Pior avaliadas',
-  };
-
-  String get key => name;
-
-  static SortOption fromKey(String key, SortOption fallback) {
-    return SortOption.values.firstWhere(
-      (e) => e.name == key,
-      orElse: () => fallback,
-    );
-  }
-}
-
-Future<List<String>> _scanDirectoryForPaths(String rootPath) async {
-  final paths = <String>[];
-  final dir = Directory(rootPath);
-  if (!await dir.exists()) return paths;
-  await for (final entity in dir.list(recursive: true, followLinks: false)) {
-    if (entity is File && MusicTrack.isSupported(entity.path)) {
-      paths.add(entity.path);
-    }
-  }
-  return paths;
-}
-
-Future<List<MusicTrack>> _buildTracksFromPaths(List<String> paths) async {
-  final tracks = <MusicTrack>[];
-  for (final path in paths) {
-    tracks.add(await _extractMetadata(path));
-  }
-  return tracks;
-}
-
-Future<MusicTrack> _extractMetadata(String path) async {
-  String title = _cleanFilename(path);
-  String artist = 'Artista Desconhecido';
-  String album = 'Álbum Desconhecido';
-
-  final lower = path.toLowerCase();
-  try {
-    if (lower.endsWith('.mp3')) {
-      final tags = await _readId3v2(File(path));
-      if (tags['title'] != null) title = tags['title']!;
-      if (tags['artist'] != null) artist = tags['artist']!;
-      if (tags['album'] != null) album = tags['album']!;
-    } else if (lower.endsWith('.m4a') || lower.endsWith('.mp4')) {
-      final tags = await _readMp4Metadata(path);
-      if (tags['title'] != null) title = tags['title']!;
-      if (tags['artist'] != null) artist = tags['artist']!;
-      if (tags['album'] != null) album = tags['album']!;
-    }
-  } catch (_) {}
-
-  // CoverArtService não é chamado aqui pois getTemporaryDirectory()
-  // não funciona corretamente em isolates no Android.
-  // A extração de capa ocorre na thread principal após o compute().
-  return MusicTrack(path: path, title: title, artist: artist, album: album);
-}
-
-String _cleanFilename(String path) {
-  String name = path.split(Platform.pathSeparator).last;
-  if (name.contains('.')) name = name.substring(0, name.lastIndexOf('.'));
-  name = name.replaceFirst(RegExp(r'^\d{1,3}[\s._-]+'), '');
-  name = name.replaceAll('_', ' ').replaceAll(RegExp(r'\s+'), ' ').trim();
-  return name.isEmpty ? 'Faixa Desconhecida' : name;
-}
-
-Future<Map<String, String?>> _readId3v2(File file) async {
-  final result = <String, String?>{};
-  final raf = await file.open(mode: FileMode.read);
-  try {
-    final header = await raf.read(10);
-    if (header[0] != 0x49 || header[1] != 0x44 || header[2] != 0x33)
-      return result;
-    final tagSize =
-        ((header[6] & 0x7F) << 21) |
-        ((header[7] & 0x7F) << 14) |
-        ((header[8] & 0x7F) << 7) |
-        (header[9] & 0x7F);
-    final tagData = await raf.read(tagSize);
-    int pos = 0;
-    while (pos + 10 <= tagData.length) {
-      final frameId = String.fromCharCodes(tagData.sublist(pos, pos + 4));
-      if (frameId == '\x00\x00\x00\x00') break;
-      final frameSize =
-          (tagData[pos + 4] << 24) |
-          (tagData[pos + 5] << 16) |
-          (tagData[pos + 6] << 8) |
-          tagData[pos + 7];
-      pos += 10;
-      if (frameSize <= 0 || pos + frameSize > tagData.length) break;
-      if (frameId == 'TIT2' || frameId == 'TPE1' || frameId == 'TALB') {
-        final encoding = tagData[pos];
-        final contentBytes = tagData.sublist(pos + 1, pos + frameSize);
-        String text;
-        if (encoding == 1 || encoding == 2) {
-          final bom = contentBytes.length >= 2
-              ? (contentBytes[0] << 8 | contentBytes[1])
-              : 0;
-          final start = (bom == 0xFFFE || bom == 0xFEFF) ? 2 : 0;
-          text = _decodeUtf16(contentBytes.sublist(start));
-        } else {
-          text = String.fromCharCodes(contentBytes.where((b) => b != 0));
-        }
-        text = text.trim();
-        if (text.isNotEmpty) {
-          if (frameId == 'TIT2') result['title'] = text;
-          if (frameId == 'TPE1') result['artist'] = text;
-          if (frameId == 'TALB') result['album'] = text;
-        }
-      }
-      pos += frameSize;
-    }
-  } finally {
-    await raf.close();
-  }
-  return result;
-}
-
-String _decodeUtf16(List<int> bytes) {
-  final buffer = StringBuffer();
-  for (int i = 0; i + 1 < bytes.length; i += 2) {
-    final cu = bytes[i] | (bytes[i + 1] << 8);
-    if (cu == 0) break;
-    buffer.writeCharCode(cu);
-  }
-  return buffer.toString();
-}
-
-Future<Map<String, String?>> _readMp4Metadata(String path) async {
-  final result = <String, String?>{};
-  final file = File(path);
-  if (!await file.exists()) return result;
-  final bytes = await file.readAsBytes();
-  _parseMp4Boxes(bytes, 0, bytes.length, result);
-  return result;
-}
-
-void _parseMp4Boxes(
-  List<int> bytes,
-  int offset,
-  int limit,
-  Map<String, String?> result,
-) {
-  int pos = offset;
-  while (pos + 8 <= limit) {
-    final size = _readUint32BE(bytes, pos);
-    if (size < 8 || pos + size > limit) break;
-    final name = String.fromCharCodes(
-      bytes.sublist(pos + 4, pos + 8).map((b) => b & 0xFF),
-    );
-    if (name == '\u00A9nam' || name == '©nam') {
-      result['title'] = _readItunesStringBox(bytes, pos + 8, pos + size);
-    } else if (name == '\u00A9ART' || name == '©ART') {
-      result['artist'] = _readItunesStringBox(bytes, pos + 8, pos + size);
-    } else if (name == '\u00A9alb' || name == '©alb') {
-      result['album'] = _readItunesStringBox(bytes, pos + 8, pos + size);
-    }
-    if (_isMp4Container(name)) {
-      int innerOffset = pos + 8;
-      if (name == 'meta') innerOffset += 4;
-      _parseMp4Boxes(bytes, innerOffset, pos + size, result);
-    }
-    pos += size;
-    if (result['title'] != null &&
-        result['artist'] != null &&
-        result['album'] != null)
-      break;
-  }
-}
-
-String? _readItunesStringBox(List<int> bytes, int offset, int limit) {
-  int pos = offset;
-  while (pos + 8 <= limit) {
-    final size = _readUint32BE(bytes, pos);
-    if (size < 8 || pos + size > limit) break;
-    final name = String.fromCharCodes(
-      bytes.sublist(pos + 4, pos + 8).map((b) => b & 0xFF),
-    );
-    if (name == 'data' && size > 16) {
-      final text = String.fromCharCodes(
-        bytes.sublist(pos + 16, pos + size),
-      ).trim();
-      return text.isNotEmpty ? text : null;
-    }
-    pos += size;
-  }
-  return null;
-}
-
-bool _isMp4Container(String name) {
-  const containers = {
-    'moov',
-    'udta',
-    'meta',
-    'ilst',
-    'trak',
-    'mdia',
-    'minf',
-    'stbl',
-    'edts',
-    'dinf',
-    'sinf',
-  };
-  return containers.contains(name);
-}
-
-int _readUint32BE(List<int> bytes, int offset) {
-  return ((bytes[offset] & 0xFF) << 24) |
-      ((bytes[offset + 1] & 0xFF) << 16) |
-      ((bytes[offset + 2] & 0xFF) << 8) |
-      (bytes[offset + 3] & 0xFF);
-}
-
+/// Ponto central de estado da aplicação. Agrega os serviços especializados
+/// e expõe uma API unificada para a UI via [ChangeNotifier].
+///
+/// No Riverpod, esta classe será dissolvida: cada serviço vira seu próprio
+/// [Notifier], e a UI observa apenas os providers que precisa.
 class Configuration with ChangeNotifier, DiagnosticableTreeMixin {
+  // ── Serviços ──────────────────────────────────────────────────────────────
+
+  late final QueueManager _queue;
+  late final PlaybackController _playback;
+  late final SortService _sort;
+
+  MusicAudioHandler? _audioHandler;
+
+  // ── Estado local ──────────────────────────────────────────────────────────
+
   String? _rootDirectory;
   DateTime? _lastScanDate;
   IndexingStatus _indexingStatus = IndexingStatus.idle;
   List<MusicTrack> _indexedTracks = [];
   int _indexedFileCount = 0;
-  int? _lastPlayedMusicId;
-  int _lastSeekPositionMs = 0;
   bool _isShuffleActive = false;
-  String _repeatMode = 'Off';
-  bool _isPlaying = false;
-  List<int> _playbackQueue = [];
-  List<int> _originalQueue = [];
-  int _currentQueueIndex = -1;
-  int _currentPositionMs = 0;
-  int _trackDurationMs = 0;
-  MusicAudioHandler? _audioHandler;
   bool _isLoading = true;
-  List<int> _recentlyPlayedIds = [];
-
-  SortOption _sortMusics = SortOption.titleAsc;
-  SortOption _sortPlaylists = SortOption.titleAsc;
-  SortOption _sortAlbums = SortOption.titleAsc;
-  SortOption _sortArtists = SortOption.titleAsc;
-
   double _playbackSpeed = 1.0;
-
-  // 0 = desligado; valores válidos: 1, 2, 3, 5 (segundos)
   int _crossfadeDuration = 0;
   bool _fadeOnPauseResume = false;
 
-  static const _safChannel = MethodChannel(
-    'br.com.hematsu.music_wave_player/saf',
-  );
-
-  Configuration.empty();
-
-  bool get isLoading => _isLoading;
-  SortOption get sortMusics => _sortMusics;
-  SortOption get sortPlaylists => _sortPlaylists;
-  SortOption get sortAlbums => _sortAlbums;
-  SortOption get sortArtists => _sortArtists;
-  double get playbackSpeed => _playbackSpeed;
-  int get crossfadeDuration => _crossfadeDuration;
-  bool get fadeOnPauseResume => _fadeOnPauseResume;
-
-  Future<void> loadFromStorageAsync() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      _rootDirectory = prefs.getString(_kRootDirectoryKey);
-      final ts = prefs.getInt(_kLastScanDateKey);
-      _lastScanDate = ts != null
-          ? DateTime.fromMillisecondsSinceEpoch(ts)
-          : null;
-      _lastPlayedMusicId = prefs.getInt(_kLastPlayedMusicIdKey);
-      _lastSeekPositionMs = prefs.getInt(_kLastSeekPositionMsKey) ?? 0;
-      _recentlyPlayedIds = await RecentlyPlayedService.load();
-      await FavoritesService.ensurePlaylist();
-      _sortMusics = SortOptionLabel.fromKey(
-        prefs.getString(_kSortMusicsKey) ?? '',
-        SortOption.titleAsc,
-      );
-      _sortPlaylists = SortOptionLabel.fromKey(
-        prefs.getString(_kSortPlaylistsKey) ?? '',
-        SortOption.titleAsc,
-      );
-      _sortAlbums = SortOptionLabel.fromKey(
-        prefs.getString(_kSortAlbumsKey) ?? '',
-        SortOption.titleAsc,
-      );
-      _sortArtists = SortOptionLabel.fromKey(
-        prefs.getString(_kSortArtistsKey) ?? '',
-        SortOption.titleAsc,
-      );
-      _crossfadeDuration = prefs.getInt(_kCrossfadeDurationKey) ?? 0;
-      _fadeOnPauseResume = prefs.getBool(_kFadeOnPauseResumeKey) ?? false;
-      await loadIndexedTracks();
-      if (_lastPlayedMusicId != null && currentTrackPath != null) {
-        // Só restaura a faixa se o player não estiver tocando —
-        // evita interromper reprodução em andamento após swipe-to-kill + reabrir.
-        final isAlreadyPlaying = _audioHandler?.player.state.playing ?? false;
-        if (!isAlreadyPlaying) {
-          await _audioHandler?.loadTrack(currentTrackPath!);
-        } else {
-          _isPlaying = true;
-        }
-      }
-      _audioHandler?.updateCrossfade(_crossfadeDuration);
-      _audioHandler?.updateFadeOnPauseResume(_fadeOnPauseResume);
-    } finally {
-      _isLoading = false;
-      notifyListeners();
-    }
+  Configuration.empty() {
+    _queue = QueueManager();
+    _sort = SortService(onStateChanged: notifyListeners);
+    _playback = PlaybackController(
+      queue: _queue,
+      onStateChanged: notifyListeners,
+      onTrackChanged: (_, __) => notifyListeners(),
+    );
   }
+
+  // ── Getters ───────────────────────────────────────────────────────────────
 
   String? get rootDirectory => _rootDirectory;
   DateTime? get lastScanDate => _lastScanDate;
   IndexingStatus get indexingStatus => _indexingStatus;
   int get indexedFileCount => _indexedFileCount;
   List<MusicTrack> get indexedTracks => _indexedTracks;
-  int? get lastPlayedMusicId => _lastPlayedMusicId;
-  int get lastSeekPositionMs => _lastSeekPositionMs;
+  bool get isLoading => _isLoading;
   bool get isShuffleActive => _isShuffleActive;
-  String get repeatMode => _repeatMode;
-  bool get isPlaying => _isPlaying;
-  int get currentQueueIndex => _currentQueueIndex;
-  List<int> get playbackQueue => List.unmodifiable(_playbackQueue);
-  int get currentPositionMs => _currentPositionMs;
-  int get trackDurationMs => _trackDurationMs;
-  String? get currentTrackPath => currentTrack?.path;
+  bool get isPlaying => _playback.isPlaying;
+  String get repeatMode => _playback.repeatMode;
+  int get currentQueueIndex => _queue.currentQueueIndex;
+  List<int> get playbackQueue => _queue.playbackQueue;
+  int get currentPositionMs => _playback.currentPositionMs;
+  int get trackDurationMs => _playback.trackDurationMs;
+  int? get lastPlayedMusicId => _playback.lastPlayedMusicId;
+  int get lastSeekPositionMs => _playback.lastSeekPositionMs;
+  double get playbackSpeed => _playbackSpeed;
+  int get crossfadeDuration => _crossfadeDuration;
+  bool get fadeOnPauseResume => _fadeOnPauseResume;
   MusicAudioHandler? get audioHandler => _audioHandler;
 
-  List<MusicTrack> get recentlyPlayedTracks => _recentlyPlayedIds
-      .map((id) {
-        try {
-          return _indexedTracks.firstWhere((t) => t.id == id);
-        } catch (_) {
-          return null;
-        }
-      })
+  SortOption get sortMusics => _sort.sortMusics;
+  SortOption get sortPlaylists => _sort.sortPlaylists;
+  SortOption get sortAlbums => _sort.sortAlbums;
+  SortOption get sortArtists => _sort.sortArtists;
+
+  String? get currentTrackPath => currentTrack?.path;
+
+  MusicTrack? get currentTrack {
+    final id = _playback.lastPlayedMusicId;
+    if (id == null) return null;
+    return _indexedTracks.where((t) => t.id == id).firstOrNull;
+  }
+
+  List<MusicTrack> get recentlyPlayedTracks => _playback.recentlyPlayedIds
+      .map((id) => _indexedTracks.where((t) => t.id == id).firstOrNull)
       .whereType<MusicTrack>()
       .toList();
 
-  MusicTrack? get currentTrack {
-    if (_lastPlayedMusicId == null) return null;
-    try {
-      return _indexedTracks.firstWhere((t) => t.id == _lastPlayedMusicId);
-    } catch (_) {
-      return null;
-    }
+  // ── Setters ───────────────────────────────────────────────────────────────
+
+  set audioHandler(MusicAudioHandler handler) {
+    _audioHandler = handler;
+    _playback.audioHandler = handler;
   }
+
+  set lastSeekPositionMs(int ms) => _playback.lastSeekPositionMs = ms;
 
   set rootDirectory(String path) {
     if (_rootDirectory == path) return;
@@ -402,40 +119,268 @@ class Configuration with ChangeNotifier, DiagnosticableTreeMixin {
     _saveRootDirectory(path);
   }
 
-  set audioHandler(MusicAudioHandler handler) => _audioHandler = handler;
-  set lastSeekPositionMs(int ms) => _lastSeekPositionMs = ms;
+  // ── Inicialização ─────────────────────────────────────────────────────────
+
+  Future<void> loadFromStorageAsync() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      _rootDirectory = prefs.getString(_kRootDirectoryKey);
+
+      final ts = prefs.getInt(_kLastScanDateKey);
+      _lastScanDate = ts != null
+          ? DateTime.fromMillisecondsSinceEpoch(ts)
+          : null;
+
+      _playback.initLastPlayed(
+        prefs.getInt(_kLastPlayedMusicIdKey),
+        prefs.getInt(_kLastSeekPositionMsKey) ?? 0,
+      );
+      _playback.initRecentlyPlayed(await RecentlyPlayedService.load());
+
+      await FavoritesService.ensurePlaylist();
+
+      _sort.init(
+        musics: SortOptionLabel.fromKey(
+          prefs.getString('sort_musics') ?? '',
+          SortOption.titleAsc,
+        ),
+        playlists: SortOptionLabel.fromKey(
+          prefs.getString('sort_playlists') ?? '',
+          SortOption.titleAsc,
+        ),
+        albums: SortOptionLabel.fromKey(
+          prefs.getString('sort_albums') ?? '',
+          SortOption.titleAsc,
+        ),
+        artists: SortOptionLabel.fromKey(
+          prefs.getString('sort_artists') ?? '',
+          SortOption.titleAsc,
+        ),
+      );
+
+      _crossfadeDuration = prefs.getInt(_kCrossfadeDurationKey) ?? 0;
+      _fadeOnPauseResume = prefs.getBool(_kFadeOnPauseResumeKey) ?? false;
+
+      await loadIndexedTracks();
+
+      if (_playback.lastPlayedMusicId != null && currentTrackPath != null) {
+        // Só restaura a faixa se o player não estiver tocando —
+        // evita interromper reprodução em andamento após swipe-to-kill + reabrir.
+        final isAlreadyPlaying = _audioHandler?.player.state.playing ?? false;
+        if (!isAlreadyPlaying) {
+          await _audioHandler?.loadTrack(currentTrackPath!);
+        } else {
+          syncPlayingState(true);
+        }
+      }
+
+      _audioHandler?.updateCrossfade(_crossfadeDuration);
+      _audioHandler?.updateFadeOnPauseResume(_fadeOnPauseResume);
+    } finally {
+      _isLoading = false;
+      notifyListeners();
+    }
+  }
+
+  // ── Indexação ─────────────────────────────────────────────────────────────
+
+  Future<void> loadIndexedTracks() async {
+    try {
+      _indexedTracks = await MusicDatabase.instance.readAllTracks();
+      _indexedFileCount = _indexedTracks.length;
+      if (_indexedFileCount > 0) {
+        _indexingStatus = IndexingStatus.complete;
+        _regenerateQueue();
+      } else if (_rootDirectory != null) {
+        _indexingStatus = IndexingStatus.idle;
+      }
+    } catch (e) {
+      debugPrint('Erro ao carregar faixas: $e');
+      _indexingStatus = IndexingStatus.error;
+    } finally {
+      notifyListeners();
+    }
+  }
+
+  Future<void> startIndexing() async {
+    if (_rootDirectory == null || _indexingStatus == IndexingStatus.scanning) {
+      return;
+    }
+    _indexingStatus = IndexingStatus.scanning;
+    _indexedTracks = [];
+    _indexedFileCount = 0;
+    notifyListeners();
+
+    await IndexingService.startIndexing(
+      rootDirectory: _rootDirectory!,
+      onProgress: (count) {
+        _indexedFileCount = count;
+        notifyListeners();
+      },
+      onComplete: (tracks, scanDate) {
+        _indexedTracks = tracks;
+        _indexedFileCount = tracks.length;
+        _indexingStatus = IndexingStatus.complete;
+        _lastScanDate = scanDate;
+        _regenerateQueue();
+        notifyListeners();
+      },
+      onError: (e) {
+        _indexingStatus = IndexingStatus.error;
+        debugPrint('Erro ao varrer: $e');
+        notifyListeners();
+      },
+    );
+  }
+
+  // ── Fila ──────────────────────────────────────────────────────────────────
+
+  void _regenerateQueue() {
+    _queue.regenerate(
+      tracks: _indexedTracks,
+      shuffleActive: _isShuffleActive,
+      currentTrackId: _playback.lastPlayedMusicId,
+      onCurrentCleared: (_) {
+        // A faixa atual foi removida da biblioteca — limpa o estado
+      },
+    );
+  }
+
+  void reorderQueue(int oldIndex, int newIndex) {
+    _queue.reorder(oldIndex, newIndex, _playback.lastPlayedMusicId);
+    notifyListeners();
+  }
+
+  void removeFromQueue(int index) {
+    final result = _queue.remove(
+      index: index,
+      currentTrackId: _playback.lastPlayedMusicId,
+    );
+    switch (result) {
+      case QueueRemovePause():
+        _audioHandler?.pause();
+      case QueueRemovePlayTrack(:final trackId):
+        playTrack(trackId, regenerateQueue: false);
+      case QueueRemoveNone():
+        break;
+    }
+    notifyListeners();
+  }
+
+  void jumpToQueueIndex(int index) {
+    if (index < 0 || index >= _queue.playbackQueue.length) return;
+    _queue.setCurrentIndex(index);
+    playTrack(_queue.playbackQueue[index], regenerateQueue: false);
+  }
+
+  void clearQueue() {
+    _queue.clear(_playback.lastPlayedMusicId);
+    notifyListeners();
+  }
+
+  void insertAfterCurrent(List<int> ids) {
+    _queue.insertAfterCurrent(ids);
+    notifyListeners();
+  }
+
+  void addToEndOfQueue(List<int> ids) {
+    _queue.addToEnd(ids);
+    notifyListeners();
+  }
+
+  // ── Shuffle ───────────────────────────────────────────────────────────────
+
+  void toggleShuffle() {
+    _isShuffleActive = !_isShuffleActive;
+    if (_isShuffleActive) {
+      _queue.applyShuffle(_queue.currentQueueIndex);
+    } else {
+      _queue.restoreOriginal(_playback.lastPlayedMusicId);
+    }
+    notifyListeners();
+  }
+
+  // ── Reprodução ────────────────────────────────────────────────────────────
+
+  Future<void> playTrack(int musicId, {bool regenerateQueue = true}) async {
+    final track = _indexedTracks.where((t) => t.id == musicId).firstOrNull;
+    if (track == null) return;
+    await _playback.playTrack(
+      musicId,
+      indexedTracks: _indexedTracks,
+      trackPath: track.path,
+      regenerateQueue: regenerateQueue,
+    );
+  }
+
+  Future<void> playPlaylist(Playlist playlist) async {
+    await _playback.playPlaylist(
+      playlist,
+      indexedTracks: _indexedTracks,
+      shuffleActive: _isShuffleActive,
+      pathForId: (id) =>
+          _indexedTracks.where((t) => t.id == id).firstOrNull?.path,
+    );
+  }
+
+  Future<void> playTracks(List<MusicTrack> tracks) async {
+    await _playback.playTracks(
+      tracks,
+      shuffleActive: _isShuffleActive,
+      pathForId: (id) =>
+          _indexedTracks.where((t) => t.id == id).firstOrNull?.path,
+    );
+  }
+
+  void togglePlayPause() {
+    _playback.togglePlayPause(
+      indexedTracks: _indexedTracks,
+      currentTrackPath: currentTrackPath,
+    );
+  }
+
+  void playNextTrack() {
+    _playback.playNextTrack(indexedTracks: _indexedTracks);
+  }
+
+  void playPreviousTrack() {
+    _playback.playPreviousTrack(indexedTracks: _indexedTracks);
+  }
+
+  void toggleRepeatMode() => _playback.toggleRepeatMode();
+
+  void trackDidFinish() {
+    _playback.trackDidFinish(indexedTracks: _indexedTracks);
+  }
+
+  void seekTo(int ms) => _audioHandler?.seek(Duration(milliseconds: ms));
+
+  void syncPlayingState(bool playing) => _playback.syncPlayingState(playing);
+
+  void updateCurrentPosition(int ms) => _playback.updateCurrentPosition(ms);
+
+  void updateTrackDuration(int ms) => _playback.updateTrackDuration(ms);
+
+  Future<void> saveCurrentPositionForResume(int ms) =>
+      _playback.saveCurrentPositionForResume(ms);
+
+  Future<void> clearRecentlyPlayed() => _playback.clearRecentlyPlayed();
 
   // ── Ordenação ─────────────────────────────────────────────────────────────
 
-  Future<void> setSortMusics(SortOption option) async {
-    _sortMusics = option;
-    notifyListeners();
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_kSortMusicsKey, option.key);
-  }
+  List<MusicTrack> applySortToTracks(
+    List<MusicTrack> tracks,
+    SortOption option,
+  ) => SortService.apply(tracks, option);
 
-  Future<void> setSortPlaylists(SortOption option) async {
-    _sortPlaylists = option;
-    notifyListeners();
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_kSortPlaylistsKey, option.key);
-  }
+  Future<void> setSortMusics(SortOption option) => _sort.setSortMusics(option);
+  Future<void> setSortPlaylists(SortOption option) =>
+      _sort.setSortPlaylists(option);
+  Future<void> setSortAlbums(SortOption option) => _sort.setSortAlbums(option);
+  Future<void> setSortArtists(SortOption option) =>
+      _sort.setSortArtists(option);
 
-  Future<void> setSortAlbums(SortOption option) async {
-    _sortAlbums = option;
-    notifyListeners();
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_kSortAlbumsKey, option.key);
-  }
-
-  Future<void> setSortArtists(SortOption option) async {
-    _sortArtists = option;
-    notifyListeners();
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_kSortArtistsKey, option.key);
-  }
-
-  // ── Velocidade de reprodução ──────────────────────────────────────────────
+  // ── Velocidade / Crossfade / Fade ─────────────────────────────────────────
 
   void setPlaybackSpeed(double speed) {
     _playbackSpeed = speed;
@@ -459,267 +404,38 @@ class Configuration with ChangeNotifier, DiagnosticableTreeMixin {
     await prefs.setBool(_kFadeOnPauseResumeKey, enabled);
   }
 
-  List<MusicTrack> applySortToTracks(
-    List<MusicTrack> tracks,
-    SortOption option,
-  ) {
-    final list = List<MusicTrack>.of(tracks);
-    switch (option) {
-      case SortOption.titleAsc:
-        list.sort(
-          (a, b) => MusicDatabase.naturalCompare(
-            a.title.toLowerCase(),
-            b.title.toLowerCase(),
-          ),
-        );
-      case SortOption.titleDesc:
-        list.sort(
-          (a, b) => MusicDatabase.naturalCompare(
-            b.title.toLowerCase(),
-            a.title.toLowerCase(),
-          ),
-        );
-      case SortOption.artistAsc:
-        list.sort(
-          (a, b) => MusicDatabase.naturalCompare(
-            a.artist.toLowerCase(),
-            b.artist.toLowerCase(),
-          ),
-        );
-      case SortOption.artistDesc:
-        list.sort(
-          (a, b) => MusicDatabase.naturalCompare(
-            b.artist.toLowerCase(),
-            a.artist.toLowerCase(),
-          ),
-        );
-      case SortOption.random:
-        list.shuffle();
-      case SortOption.ratingDesc:
-        list.sort((a, b) => b.rating.compareTo(a.rating));
-      case SortOption.ratingAsc:
-        list.sort((a, b) => a.rating.compareTo(b.rating));
-    }
-    return list;
-  }
-
   // ── Avaliação ─────────────────────────────────────────────────────────────
 
   Future<void> setRating(int trackId, double rating) async {
-    await MusicDatabase.instance.updateRating(trackId, rating);
     final idx = _indexedTracks.indexWhere((t) => t.id == trackId);
-    if (idx != -1) {
-      _indexedTracks[idx] = _indexedTracks[idx].copyWith(rating: rating);
-      notifyListeners();
-    }
+    if (idx == -1) return;
+    final updated = await TrackRepository.setRating(
+      _indexedTracks[idx],
+      rating,
+    );
+    _indexedTracks[idx] = updated;
+    notifyListeners();
   }
 
-  // ── Ocultar/Reexibir ──────────────────────────────────────────────────────
+  // ── Ocultar / Reexibir ────────────────────────────────────────────────────
 
   Future<void> hideTracks(List<int> ids) async {
     if (ids.isEmpty) return;
-    await MusicDatabase.instance.setHidden(ids, hidden: true);
-
+    await TrackRepository.hideTracks(ids);
     _indexedTracks.removeWhere((t) => ids.contains(t.id));
-
-    for (int i = _playbackQueue.length - 1; i >= 0; i--) {
-      if (ids.contains(_playbackQueue[i])) {
-        removeFromQueue(i);
-      }
-    }
-
-    _originalQueue.removeWhere((id) => ids.contains(id));
+    _queue.removeTracksById(ids);
     _regenerateQueue();
     notifyListeners();
   }
 
   Future<void> unhideTracks(List<int> ids) async {
-    if (ids.isEmpty) return;
-    await MusicDatabase.instance.setHidden(ids, hidden: false);
+    await TrackRepository.unhideTracks(ids);
     await loadIndexedTracks();
   }
 
   Future<void> unhideAllTracks() async {
-    await MusicDatabase.instance.unhideAll();
+    await TrackRepository.unhideAllTracks();
     await loadIndexedTracks();
-  }
-
-  // ── Shuffle ───────────────────────────────────────────────────────────────
-
-  void toggleShuffle() {
-    _isShuffleActive = !_isShuffleActive;
-    if (_isShuffleActive) {
-      _applyShuffleToCurrentQueue();
-    } else {
-      _restoreOriginalQueue();
-    }
-    notifyListeners();
-  }
-
-  void _applyShuffleToCurrentQueue() {
-    if (_playbackQueue.length <= 1) return;
-    _originalQueue = List.of(_playbackQueue);
-    final rng = Random();
-    final before = _playbackQueue.sublist(0, _currentQueueIndex)..shuffle(rng);
-    final current = _playbackQueue[_currentQueueIndex];
-    final after = _playbackQueue.sublist(_currentQueueIndex + 1)..shuffle(rng);
-    _playbackQueue = [...before, current, ...after];
-  }
-
-  void _restoreOriginalQueue() {
-    if (_originalQueue.isEmpty) return;
-    _playbackQueue = List.of(_originalQueue);
-    if (_lastPlayedMusicId != null) {
-      _currentQueueIndex = _playbackQueue.indexOf(_lastPlayedMusicId!);
-    }
-  }
-
-  // ── Fila ─────────────────────────────────────────────────────────────────
-
-  void _setQueue(List<int> orderedIds) {
-    _originalQueue = List.of(orderedIds);
-    _currentQueueIndex = 0;
-    if (_isShuffleActive && orderedIds.length > 1) {
-      final first = orderedIds.first;
-      final rest = orderedIds.sublist(1)..shuffle();
-      _playbackQueue = [first, ...rest];
-    } else {
-      _playbackQueue = List.of(orderedIds);
-    }
-  }
-
-  void syncPlayingState(bool playing) {
-    if (_isPlaying != playing) {
-      _isPlaying = playing;
-      notifyListeners();
-    }
-  }
-
-  void updateCurrentPosition(int ms) {
-    if (_currentPositionMs != ms) {
-      _currentPositionMs = ms;
-      notifyListeners();
-    }
-  }
-
-  void updateTrackDuration(int ms) {
-    if (_trackDurationMs != ms) {
-      _trackDurationMs = ms;
-      notifyListeners();
-    }
-  }
-
-  void seekTo(int ms) => _audioHandler?.seek(Duration(milliseconds: ms));
-
-  void reorderQueue(int oldIndex, int newIndex) {
-    if (oldIndex < newIndex) newIndex -= 1;
-    final id = _playbackQueue.removeAt(oldIndex);
-    _playbackQueue.insert(newIndex, id);
-    _currentQueueIndex = _playbackQueue.indexOf(_lastPlayedMusicId!);
-    _originalQueue = List.of(_playbackQueue);
-    notifyListeners();
-  }
-
-  void removeFromQueue(int index) {
-    if (index < 0 || index >= _playbackQueue.length) return;
-    final removingCurrent = index == _currentQueueIndex;
-    final removedId = _playbackQueue.removeAt(index);
-    _originalQueue.remove(removedId);
-    if (removingCurrent) {
-      if (_playbackQueue.isEmpty) {
-        _lastPlayedMusicId = null;
-        _currentQueueIndex = -1;
-        _audioHandler?.pause();
-      } else {
-        _currentQueueIndex = index.clamp(0, _playbackQueue.length - 1);
-        playTrack(_playbackQueue[_currentQueueIndex], regenerateQueue: false);
-      }
-    } else {
-      _currentQueueIndex = _playbackQueue.indexOf(_lastPlayedMusicId!);
-    }
-    notifyListeners();
-  }
-
-  void jumpToQueueIndex(int index) {
-    if (index < 0 || index >= _playbackQueue.length) return;
-    _currentQueueIndex = index;
-    playTrack(_playbackQueue[index], regenerateQueue: false);
-  }
-
-  void clearQueue() {
-    if (_lastPlayedMusicId == null) return;
-    _playbackQueue = [_lastPlayedMusicId!];
-    _originalQueue = [_lastPlayedMusicId!];
-    _currentQueueIndex = 0;
-    notifyListeners();
-  }
-
-  void insertAfterCurrent(List<int> ids) {
-    if (ids.isEmpty) return;
-    final insertAt = _currentQueueIndex + 1;
-    for (int i = 0; i < ids.length; i++) {
-      _playbackQueue.insert(insertAt + i, ids[i]);
-      _originalQueue.insert(insertAt + i, ids[i]);
-    }
-    notifyListeners();
-  }
-
-  void addToEndOfQueue(List<int> ids) {
-    if (ids.isEmpty) return;
-    _playbackQueue.addAll(ids);
-    _originalQueue.addAll(ids);
-    notifyListeners();
-  }
-
-  Future<void> clearRecentlyPlayed() async {
-    await RecentlyPlayedService.clear();
-    _recentlyPlayedIds = [];
-    notifyListeners();
-  }
-
-  Future<void> _triggerMediaScan(String dirPath) async {
-    try {
-      await _safChannel.invokeMethod('scanMedia', {'path': dirPath});
-    } catch (_) {}
-  }
-
-  // ── Playlist ──────────────────────────────────────────────────────────────
-
-  Future<void> playPlaylist(Playlist playlist) async {
-    if (playlist.trackIds.isEmpty) return;
-    final validIds = playlist.trackIds
-        .where((id) => _indexedTracks.any((t) => t.id == id))
-        .toList();
-    if (validIds.isEmpty) return;
-    _setQueue(validIds);
-    _lastPlayedMusicId = _playbackQueue.first;
-    _saveLastPlayedMusicId(_lastPlayedMusicId!);
-    _lastSeekPositionMs = 0;
-    _currentPositionMs = 0;
-    _trackDurationMs = 0;
-    await _audioHandler?.loadTrack(currentTrackPath!);
-    _isPlaying = true;
-    notifyListeners();
-    _audioHandler?.play();
-  }
-
-  Future<void> playTracks(List<MusicTrack> tracks) async {
-    if (tracks.isEmpty) return;
-    final visibleIds = tracks
-        .where((t) => !t.isHidden)
-        .map((t) => t.id!)
-        .toList();
-    if (visibleIds.isEmpty) return;
-    _setQueue(visibleIds);
-    _lastPlayedMusicId = _playbackQueue.first;
-    _saveLastPlayedMusicId(_lastPlayedMusicId!);
-    _lastSeekPositionMs = 0;
-    _currentPositionMs = 0;
-    _trackDurationMs = 0;
-    await _audioHandler?.loadTrack(currentTrackPath!);
-    _isPlaying = true;
-    notifyListeners();
-    _audioHandler?.play();
   }
 
   // ── Edição de metadados ───────────────────────────────────────────────────
@@ -731,65 +447,42 @@ class Configuration with ChangeNotifier, DiagnosticableTreeMixin {
     required String newAlbum,
     required BuildContext context,
   }) async {
-    String? folderUri = await SafService.ensureAccess();
-    if (folderUri == null) {
-      if (context.mounted)
-        _showSnack(context, 'Acesso à pasta negado. Edição cancelada.');
-      return false;
-    }
-    final tempPath = await FfmpegService.writeMetadata(
-      inputPath: track.path,
-      title: newTitle,
-      artist: newArtist,
-      album: newAlbum,
+    final result = await TrackRepository.editTrack(
+      track: track,
+      newTitle: newTitle,
+      newArtist: newArtist,
+      newAlbum: newAlbum,
     );
-    if (tempPath == null) {
-      if (context.mounted)
-        _showSnack(context, 'Erro ao processar o arquivo. Tente novamente.');
-      return false;
+
+    switch (result) {
+      case TrackEditSuccess(:final updatedTrack):
+        final idx = _indexedTracks.indexWhere((t) => t.id == track.id);
+        if (idx != -1) {
+          _indexedTracks[idx] = updatedTrack;
+          _indexedTracks.sort(
+            (a, b) => MusicDatabase.naturalCompare(
+              a.title.toLowerCase(),
+              b.title.toLowerCase(),
+            ),
+          );
+          notifyListeners();
+        }
+        if (_playback.lastPlayedMusicId == track.id) {
+          await _audioHandler?.loadTrack(track.path);
+        }
+        if (context.mounted) {
+          _showSnack(
+            context,
+            'Informações salvas com sucesso!',
+            isSuccess: true,
+          );
+        }
+        return true;
+
+      case TrackEditFailure(:final reason):
+        if (context.mounted) _showSnack(context, reason);
+        return false;
     }
-    final fileName = track.path.split('/').last;
-    final copied = await SafService.copyTempToSaf(
-      tempPath: tempPath,
-      targetFileName: fileName,
-      folderUri: folderUri,
-    );
-    try {
-      await File(tempPath).delete();
-    } catch (_) {}
-    if (!copied) {
-      if (context.mounted)
-        _showSnack(context, 'Erro ao salvar o arquivo. Tente novamente.');
-      return false;
-    }
-    await MusicDatabase.instance.updateTrack(
-      id: track.id!,
-      title: newTitle,
-      artist: newArtist,
-      album: newAlbum,
-    );
-    final idx = _indexedTracks.indexWhere((t) => t.id == track.id);
-    if (idx != -1) {
-      _indexedTracks[idx] = track.copyWith(
-        title: newTitle,
-        artist: newArtist,
-        album: newAlbum,
-        isEdited: true,
-      );
-      _indexedTracks.sort(
-        (a, b) => MusicDatabase.naturalCompare(
-          a.title.toLowerCase(),
-          b.title.toLowerCase(),
-        ),
-      );
-      notifyListeners();
-    }
-    if (_lastPlayedMusicId == track.id) {
-      await _audioHandler?.loadTrack(track.path);
-    }
-    if (context.mounted)
-      _showSnack(context, 'Informações salvas com sucesso!', isSuccess: true);
-    return true;
   }
 
   void _showSnack(
@@ -808,245 +501,14 @@ class Configuration with ChangeNotifier, DiagnosticableTreeMixin {
     );
   }
 
-  Future<void> _saveLastPlayedMusicId(int id) async {
-    final p = await SharedPreferences.getInstance();
-    await p.setInt(_kLastPlayedMusicIdKey, id);
-  }
-
-  Future<void> _saveLastSeekPosition(int ms) async {
-    final p = await SharedPreferences.getInstance();
-    await p.setInt(_kLastSeekPositionMsKey, ms);
-  }
-
-  Future<void> saveCurrentPositionForResume(int ms) async {
-    _lastSeekPositionMs = ms;
-    await _saveLastSeekPosition(ms);
-  }
-
-  Future<void> _saveLastScanDate(DateTime d) async {
-    final p = await SharedPreferences.getInstance();
-    await p.setInt(_kLastScanDateKey, d.millisecondsSinceEpoch);
-  }
+  // ── Persistência local ────────────────────────────────────────────────────
 
   Future<void> _saveRootDirectory(String path) async {
-    final p = await SharedPreferences.getInstance();
-    await p.setString(_kRootDirectoryKey, path);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_kRootDirectoryKey, path);
   }
 
-  void _regenerateQueue() {
-    final ids = _indexedTracks.map((t) => t.id!).toList();
-    _originalQueue = List.of(ids);
-    _playbackQueue = _isShuffleActive ? (List.of(ids)..shuffle()) : ids;
-    if (_lastPlayedMusicId != null) {
-      _currentQueueIndex = _playbackQueue.indexOf(_lastPlayedMusicId!);
-      if (_currentQueueIndex == -1) {
-        _lastPlayedMusicId = null;
-        _currentQueueIndex = -1;
-      }
-    }
-  }
-
-  Future<void> loadIndexedTracks() async {
-    try {
-      _indexedTracks = await MusicDatabase.instance.readAllTracks();
-      _indexedFileCount = _indexedTracks.length;
-      if (_indexedFileCount > 0) {
-        _indexingStatus = IndexingStatus.complete;
-        _regenerateQueue();
-      } else if (_rootDirectory != null) {
-        _indexingStatus = IndexingStatus.idle;
-      }
-    } catch (e) {
-      debugPrint('Erro ao carregar faixas: $e');
-      _indexingStatus = IndexingStatus.error;
-    } finally {
-      notifyListeners();
-    }
-  }
-
-  Future<void> startIndexing() async {
-    if (_rootDirectory == null || _indexingStatus == IndexingStatus.scanning)
-      return;
-    _indexingStatus = IndexingStatus.scanning;
-    _indexedTracks = [];
-    _indexedFileCount = 0;
-    notifyListeners();
-    try {
-      final paths = await compute(_scanDirectoryForPaths, _rootDirectory!);
-      const batchSize = 50;
-      final allTracks = <MusicTrack>[];
-      for (int i = 0; i < paths.length; i += batchSize) {
-        final batch = paths.sublist(i, (i + batchSize).clamp(0, paths.length));
-        final batchTracks = await compute(_buildTracksFromPaths, batch);
-        allTracks.addAll(batchTracks);
-        _indexedFileCount = allTracks.length;
-        notifyListeners();
-      }
-
-      // Lê duração de cada faixa usando o player MPV já inicializado
-      final durationPlayer = Player(
-        configuration: const PlayerConfiguration(autoPlay: false),
-      );
-      for (int i = 0; i < allTracks.length; i++) {
-        try {
-          final completer = Completer<Duration>();
-          final sub = durationPlayer.stream.duration.listen((d) {
-            if (d > Duration.zero && !completer.isCompleted) {
-              completer.complete(d);
-            }
-          });
-          await durationPlayer.open(
-            Media('file://${allTracks[i].path}'),
-            play: false,
-          );
-          final duration = await completer.future.timeout(
-            const Duration(seconds: 3),
-            onTimeout: () => Duration.zero,
-          );
-          await sub.cancel();
-          allTracks[i] = allTracks[i].copyWith(
-            durationMs: duration.inMilliseconds,
-          );
-        } catch (_) {}
-      }
-      await durationPlayer.dispose();
-
-      // Extrai capas na thread principal (getTemporaryDirectory não funciona em isolates)
-      for (int i = 0; i < allTracks.length; i++) {
-        try {
-          final coverPath = await CoverArtService.extractAndSave(
-            allTracks[i].path,
-          );
-          if (coverPath != null) {
-            allTracks[i] = allTracks[i].copyWith(coverPath: coverPath);
-          }
-        } catch (_) {}
-      }
-
-      _indexedTracks = await MusicDatabase.instance.insertTracks(allTracks);
-      _indexedFileCount = _indexedTracks.length;
-      _indexingStatus = IndexingStatus.complete;
-      _lastScanDate = DateTime.now();
-      await _saveLastScanDate(_lastScanDate!);
-      _regenerateQueue();
-      await _triggerMediaScan(_rootDirectory!);
-    } catch (e) {
-      _indexingStatus = IndexingStatus.error;
-      debugPrint('Erro ao varrer: $e');
-    } finally {
-      notifyListeners();
-    }
-  }
-
-  Future<void> playTrack(int musicId, {bool regenerateQueue = true}) async {
-    final idx = _indexedTracks.indexWhere((t) => t.id == musicId);
-    if (idx == -1) return;
-    if (_lastPlayedMusicId != musicId) {
-      if (_lastPlayedMusicId != null) {
-        _recentlyPlayedIds = await RecentlyPlayedService.push(
-          _lastPlayedMusicId!,
-          _recentlyPlayedIds,
-        );
-      }
-      if (regenerateQueue) _regenerateQueue();
-      _currentQueueIndex = _playbackQueue.indexOf(musicId);
-      _lastPlayedMusicId = musicId;
-      _saveLastPlayedMusicId(musicId);
-      _lastSeekPositionMs = 0;
-      _currentPositionMs = 0;
-      _trackDurationMs = 0;
-      await _audioHandler?.loadTrack(currentTrackPath!);
-    }
-    _isPlaying = true;
-    notifyListeners();
-    _audioHandler?.play();
-  }
-
-  void togglePlayPause() {
-    if (_lastPlayedMusicId == null && _indexedTracks.isNotEmpty) {
-      if (_playbackQueue.isNotEmpty) {
-        final id = _playbackQueue.first;
-        _lastPlayedMusicId = id;
-        _currentQueueIndex = 0;
-        _saveLastPlayedMusicId(id);
-        _isPlaying = true;
-        notifyListeners();
-        _audioHandler?.loadTrack(currentTrackPath!).then((_) {
-          _audioHandler?.play();
-        });
-      }
-      return;
-    }
-    if (_lastPlayedMusicId != null) {
-      _isPlaying = !_isPlaying;
-      notifyListeners();
-      if (_isPlaying) {
-        // Se o player completou a faixa (temporizador pausou no fim),
-        // avança para a próxima música
-        final isCompleted = _audioHandler?.player.state.completed ?? false;
-        if (isCompleted) {
-          playNextTrack();
-        } else {
-          _audioHandler?.play();
-        }
-      } else {
-        _saveLastSeekPosition(_currentPositionMs);
-        _audioHandler?.pause();
-      }
-    }
-  }
-
-  void playNextTrack({bool manualSkip = true}) {
-    if (_playbackQueue.isEmpty) return;
-    int next = _currentQueueIndex + 1;
-    if (next >= _playbackQueue.length) {
-      if (_repeatMode == 'All') {
-        next = 0;
-      } else {
-        _audioHandler?.pause();
-        return;
-      }
-    }
-    _currentQueueIndex = next;
-    playTrack(_playbackQueue[next], regenerateQueue: false);
-  }
-
-  void playPreviousTrack() {
-    if (_playbackQueue.isEmpty) return;
-    if (_currentPositionMs > 3000) {
-      seekTo(0);
-      return;
-    }
-    int prev = _currentQueueIndex - 1;
-    if (prev < 0) {
-      if (_repeatMode == 'All') {
-        prev = _playbackQueue.length - 1;
-      } else {
-        seekTo(0);
-        return;
-      }
-    }
-    _currentQueueIndex = prev;
-    playTrack(_playbackQueue[prev], regenerateQueue: false);
-  }
-
-  void toggleRepeatMode() {
-    _repeatMode = switch (_repeatMode) {
-      'Off' => 'All',
-      'All' => 'One',
-      _ => 'Off',
-    };
-    notifyListeners();
-  }
-
-  void trackDidFinish() {
-    if (_lastPlayedMusicId == null || _playbackQueue.isEmpty) return;
-    if (_repeatMode == 'One') {
-      playTrack(_lastPlayedMusicId!);
-      return;
-    }
-    playNextTrack(manualSkip: false);
-  }
+  // ── Debug ─────────────────────────────────────────────────────────────────
 
   @override
   void debugFillProperties(DiagnosticPropertiesBuilder properties) {
