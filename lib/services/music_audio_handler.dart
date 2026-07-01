@@ -73,6 +73,23 @@ class MusicAudioHandler {
     _fadeOnPauseResume = enabled;
   }
 
+  // ── Equalizador ───────────────────────────────────────────────────────────
+
+  /// Aplica o equalizador gráfico (filtro `superequalizer`) com os ganhos
+  /// calculados pelo [EqualizerService]. Chamado na inicialização (para
+  /// restaurar o estado salvo) e sempre que o usuário altera banda, preset
+  /// ou liga/desliga o EQ.
+  Future<void> applyEqualizer(bool enabled, Map<String, double> params) async {
+    await player.updateAudioEffects(
+      (e) => e.copyWith(
+        superequalizer: SuperequalizerSettings(
+          enabled: enabled,
+          params: params,
+        ),
+      ),
+    );
+  }
+
   // ── Normalização de volume ────────────────────────────────────────────────
 
   /// Aplica o pré-amp (setVolumeGain) calculado a partir do loudness

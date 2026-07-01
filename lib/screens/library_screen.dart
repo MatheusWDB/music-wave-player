@@ -4,6 +4,7 @@ import 'package:music_wave_player/components/tabs_component.dart';
 import 'package:music_wave_player/components/audio_transitions_bottom_sheet.dart';
 import 'package:music_wave_player/components/recap_widget.dart';
 import 'package:music_wave_player/models/configuration.dart';
+import 'package:music_wave_player/screens/equalizer_screen.dart';
 import 'package:music_wave_player/screens/hidden_tracks_screen.dart';
 import 'package:music_wave_player/screens/most_played_screen.dart';
 import 'package:music_wave_player/screens/recently_added_screen.dart';
@@ -163,6 +164,12 @@ class _AppMenu extends StatelessWidget {
                 Navigator.pop(context);
                 AudioTransitionsBottomSheet.show(context);
               },
+            ),
+            ListTile(
+              leading: Icon(Icons.graphic_eq, color: colorScheme.primary),
+              title: const Text('Equalizador'),
+              subtitle: const Text('Ajustar graves, médios e agudos'),
+              onTap: () => go(const EqualizerScreen()),
             ),
             ListTile(
               leading: Icon(

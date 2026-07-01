@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:music_wave_player/data/music_database.dart';
 import 'package:music_wave_player/models/music_track.dart';
 import 'package:music_wave_player/models/playlist.dart';
+import 'package:music_wave_player/services/equalizer_service.dart';
 import 'package:music_wave_player/services/favorites_service.dart';
 import 'package:music_wave_player/services/indexing_service.dart';
 import 'package:music_wave_player/services/music_audio_handler.dart';
@@ -15,6 +16,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 export 'package:music_wave_player/services/sort_service.dart'
     show SortOption, SortOptionLabel;
+export 'package:music_wave_player/services/equalizer_service.dart'
+    show EqualizerPreset, EqualizerPresetLabel, EqualizerBand;
 
 const String _kRootDirectoryKey = 'rootDirectoryPath';
 const String _kLastScanDateKey = 'lastScanDate';
@@ -43,6 +46,7 @@ class Configuration with ChangeNotifier, DiagnosticableTreeMixin {
   late final QueueManager _queue;
   late final PlaybackController _playback;
   late final SortService _sort;
+  late final EqualizerService _equalizer;
 
   MusicAudioHandler? _audioHandler;
 
@@ -66,6 +70,7 @@ class Configuration with ChangeNotifier, DiagnosticableTreeMixin {
   Configuration.empty() {
     _queue = QueueManager();
     _sort = SortService(onStateChanged: notifyListeners);
+    _equalizer = EqualizerService(onStateChanged: notifyListeners);
     _playback = PlaybackController(
       queue: _queue,
       onStateChanged: notifyListeners,
@@ -103,6 +108,16 @@ class Configuration with ChangeNotifier, DiagnosticableTreeMixin {
   SortOption get sortPlaylists => _sort.sortPlaylists;
   SortOption get sortAlbums => _sort.sortAlbums;
   SortOption get sortArtists => _sort.sortArtists;
+
+  // ── Equalizador ───────────────────────────────────────────────────────────
+
+  bool get eqEnabled => _equalizer.enabled;
+  EqualizerPreset get eqActivePreset => _equalizer.activePreset;
+  List<double> get eqBandGains => _equalizer.bandGains;
+  List<EqualizerBand> get eqBandDefinitions => EqualizerService.bands;
+  double get eqMinGain => EqualizerService.minGain;
+  double get eqMaxGain => EqualizerService.maxGain;
+  double get eqFlatGain => EqualizerService.flatGain;
 
   String? get currentTrackPath => currentTrack?.path;
 
@@ -176,6 +191,8 @@ class Configuration with ChangeNotifier, DiagnosticableTreeMixin {
       _crossfadeDuration = prefs.getInt(_kCrossfadeDurationKey) ?? 0;
       _fadeOnPauseResume = prefs.getBool(_kFadeOnPauseResumeKey) ?? false;
 
+      await _equalizer.loadFromStorage();
+
       await loadIndexedTracks();
 
       if (_playback.lastPlayedMusicId != null && currentTrackPath != null) {
@@ -191,6 +208,10 @@ class Configuration with ChangeNotifier, DiagnosticableTreeMixin {
 
       _audioHandler?.updateCrossfade(_crossfadeDuration);
       _audioHandler?.updateFadeOnPauseResume(_fadeOnPauseResume);
+      await _audioHandler?.applyEqualizer(
+        _equalizer.enabled,
+        _equalizer.superequalizerParams,
+      );
     } finally {
       _isLoading = false;
       notifyListeners();
@@ -438,6 +459,40 @@ class Configuration with ChangeNotifier, DiagnosticableTreeMixin {
     notifyListeners();
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_kFadeOnPauseResumeKey, enabled);
+  }
+
+  // ── Equalizador ───────────────────────────────────────────────────────────
+
+  Future<void> setEqEnabled(bool value) async {
+    await _equalizer.setEnabled(value);
+    await _audioHandler?.applyEqualizer(
+      _equalizer.enabled,
+      _equalizer.superequalizerParams,
+    );
+  }
+
+  Future<void> setEqPreset(EqualizerPreset preset) async {
+    await _equalizer.setPreset(preset);
+    await _audioHandler?.applyEqualizer(
+      _equalizer.enabled,
+      _equalizer.superequalizerParams,
+    );
+  }
+
+  Future<void> setEqBandGain(int index, double gain) async {
+    await _equalizer.setBandGain(index, gain);
+    await _audioHandler?.applyEqualizer(
+      _equalizer.enabled,
+      _equalizer.superequalizerParams,
+    );
+  }
+
+  Future<void> resetEqualizer() async {
+    await _equalizer.reset();
+    await _audioHandler?.applyEqualizer(
+      _equalizer.enabled,
+      _equalizer.superequalizerParams,
+    );
   }
 
   // ── Avaliação ─────────────────────────────────────────────────────────────
