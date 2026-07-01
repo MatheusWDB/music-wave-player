@@ -23,7 +23,14 @@ const String _kLastSeekPositionMsKey = 'lastSeekPositionMs';
 const String _kCrossfadeDurationKey = 'crossfade_duration';
 const String _kFadeOnPauseResumeKey = 'fade_on_pause_resume';
 
-enum IndexingStatus { idle, scanning, complete, error }
+enum IndexingStatus {
+  idle,
+  scanning,
+  processingMetadata,
+  calculatingLoudness,
+  complete,
+  error,
+}
 
 /// Ponto central de estado da aplicação. Agrega os serviços especializados
 /// e expõe uma API unificada para a UI via [ChangeNotifier].
@@ -46,6 +53,10 @@ class Configuration with ChangeNotifier, DiagnosticableTreeMixin {
   IndexingStatus _indexingStatus = IndexingStatus.idle;
   List<MusicTrack> _indexedTracks = [];
   int _indexedFileCount = 0;
+  int _indexedFileTotal = 0;
+  String? _processingStage;
+  int _loudnessDone = 0;
+  int _loudnessTotal = 0;
   bool _isShuffleActive = false;
   bool _isLoading = true;
   double _playbackSpeed = 1.0;
@@ -68,6 +79,10 @@ class Configuration with ChangeNotifier, DiagnosticableTreeMixin {
   DateTime? get lastScanDate => _lastScanDate;
   IndexingStatus get indexingStatus => _indexingStatus;
   int get indexedFileCount => _indexedFileCount;
+  int get indexedFileTotal => _indexedFileTotal;
+  String? get processingStage => _processingStage;
+  int get loudnessDone => _loudnessDone;
+  int get loudnessTotal => _loudnessTotal;
   List<MusicTrack> get indexedTracks => _indexedTracks;
   bool get isLoading => _isLoading;
   bool get isShuffleActive => _isShuffleActive;
@@ -202,24 +217,45 @@ class Configuration with ChangeNotifier, DiagnosticableTreeMixin {
     }
   }
 
+  bool get _isIndexingBusy =>
+      _indexingStatus == IndexingStatus.scanning ||
+      _indexingStatus == IndexingStatus.processingMetadata ||
+      _indexingStatus == IndexingStatus.calculatingLoudness;
+
   Future<void> startIndexing() async {
-    if (_rootDirectory == null || _indexingStatus == IndexingStatus.scanning) {
-      return;
-    }
+    if (_rootDirectory == null || _isIndexingBusy) return;
+
     _indexingStatus = IndexingStatus.scanning;
     _indexedTracks = [];
     _indexedFileCount = 0;
+    _indexedFileTotal = 0;
+    _processingStage = null;
+    _loudnessDone = 0;
+    _loudnessTotal = 0;
     notifyListeners();
 
     await IndexingService.startIndexing(
       rootDirectory: _rootDirectory!,
-      onProgress: (count) {
-        _indexedFileCount = count;
+      onProgress: (done, total) {
+        _indexedFileCount = done;
+        _indexedFileTotal = total;
+        notifyListeners();
+      },
+      onMetadataStage: (stage) {
+        _indexingStatus = IndexingStatus.processingMetadata;
+        _processingStage = stage;
+        notifyListeners();
+      },
+      onLoudnessProgress: (done, total) {
+        _indexingStatus = IndexingStatus.calculatingLoudness;
+        _loudnessDone = done;
+        _loudnessTotal = total;
         notifyListeners();
       },
       onComplete: (tracks, scanDate) {
         _indexedTracks = tracks;
         _indexedFileCount = tracks.length;
+        _indexedFileTotal = tracks.length;
         _indexingStatus = IndexingStatus.complete;
         _lastScanDate = scanDate;
         _regenerateQueue();
@@ -516,5 +552,9 @@ class Configuration with ChangeNotifier, DiagnosticableTreeMixin {
     properties.add(StringProperty('rootDirectory', _rootDirectory));
     properties.add(EnumProperty('indexingStatus', _indexingStatus));
     properties.add(IntProperty('indexedFileCount', _indexedFileCount));
+    properties.add(IntProperty('indexedFileTotal', _indexedFileTotal));
+    properties.add(StringProperty('processingStage', _processingStage));
+    properties.add(IntProperty('loudnessDone', _loudnessDone));
+    properties.add(IntProperty('loudnessTotal', _loudnessTotal));
   }
 }

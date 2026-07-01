@@ -12,6 +12,7 @@ class MusicTrack {
   final int durationMs;
   final double rating;
   final DateTime? addedAt;
+  final double? loudnessLufs;
 
   static const List<String> supportedExtensions = [
     '.mp3',
@@ -33,6 +34,7 @@ class MusicTrack {
     this.durationMs = 0,
     this.rating = 0,
     this.addedAt,
+    this.loudnessLufs,
   });
 
   MusicTrack copyWith({
@@ -48,6 +50,7 @@ class MusicTrack {
     int? durationMs,
     double? rating,
     DateTime? addedAt,
+    double? loudnessLufs,
   }) {
     return MusicTrack(
       id: id ?? this.id,
@@ -61,6 +64,7 @@ class MusicTrack {
       durationMs: durationMs ?? this.durationMs,
       rating: rating ?? this.rating,
       addedAt: addedAt ?? this.addedAt,
+      loudnessLufs: loudnessLufs ?? this.loudnessLufs,
     );
   }
 
@@ -80,6 +84,7 @@ class MusicTrack {
     MusicDatabase.columnDurationMs: durationMs,
     MusicDatabase.columnRating: rating,
     MusicDatabase.columnAddedAt: addedAt?.toIso8601String(),
+    MusicDatabase.columnLoudnessLufs: loudnessLufs,
   };
 
   static MusicTrack fromMap(Map<String, Object?> map) => MusicTrack(
@@ -96,6 +101,7 @@ class MusicTrack {
     addedAt: map[MusicDatabase.columnAddedAt] != null
         ? DateTime.tryParse(map[MusicDatabase.columnAddedAt] as String)
         : null,
+    loudnessLufs: (map[MusicDatabase.columnLoudnessLufs] as num?)?.toDouble(),
   );
 
   @override
@@ -103,5 +109,6 @@ class MusicTrack {
       'MusicTrack: {id: $id, path: $path, title: $title, '
       'artist: $artist, album: $album, isEdited: $isEdited, '
       'isHidden: $isHidden, rating: $rating, coverPath: $coverPath, '
-      'durationMs: $durationMs, addedAt: $addedAt}';
+      'durationMs: $durationMs, addedAt: $addedAt, '
+      'loudnessLufs: $loudnessLufs}';
 }

@@ -12,7 +12,13 @@ class IndexingComponent extends StatelessWidget {
     final Configuration config = context.watch<Configuration>();
 
     final bool isScanning = config.indexingStatus == IndexingStatus.scanning;
+    final bool isProcessingMetadata =
+        config.indexingStatus == IndexingStatus.processingMetadata;
+    final bool isCalculatingLoudness =
+        config.indexingStatus == IndexingStatus.calculatingLoudness;
     final bool isComplete = config.indexingStatus == IndexingStatus.complete;
+    final bool isBusy =
+        isScanning || isProcessingMetadata || isCalculatingLoudness;
     final bool isDirectorySet = config.rootDirectory != null;
 
     String formattedDate = '';
@@ -26,9 +32,28 @@ class IndexingComponent extends StatelessWidget {
     double? progressValue = 0.0;
 
     if (isScanning) {
-      statusText =
-          "Varrendo e indexando... (${config.indexedFileCount} arquivos encontrados)";
-      progressValue = null; // indeterminate
+      final total = config.indexedFileTotal;
+      final done = config.indexedFileCount;
+      final percent = total > 0
+          ? ((done / total) * 100).toStringAsFixed(0)
+          : '0';
+      statusText = total > 0
+          ? "Varrendo e indexando... $done/$total arquivos ($percent%)"
+          : "Varrendo e indexando...";
+      progressValue = total > 0
+          ? done / total
+          : null; // indeterminate até saber o total
+    } else if (isProcessingMetadata) {
+      statusText = config.processingStage ?? "Processando metadados...";
+      progressValue = null; // sem total granular nessa fase
+    } else if (isCalculatingLoudness) {
+      final total = config.loudnessTotal;
+      final done = config.loudnessDone;
+      final percent = total > 0
+          ? ((done / total) * 100).toStringAsFixed(0)
+          : '0';
+      statusText = "Calculando volume das músicas... $done/$total ($percent%)";
+      progressValue = total > 0 ? done / total : null;
     } else if (isComplete) {
       statusText =
           "Varredura concluída! ${config.indexedFileCount} arquivo${config.indexedFileCount == 1 ? '' : 's'} indexado${config.indexedFileCount == 1 ? '' : 's'}.";
@@ -37,9 +62,10 @@ class IndexingComponent extends StatelessWidget {
       statusText = "Clique em Iniciar Varredura.";
     }
 
-    // CORRIGIDO: botão habilitado sempre que não está varrendo e há diretório definido
-    // (inclusive após uma varredura completa, para permitir reindexar)
-    final bool canScan = isDirectorySet && !isScanning;
+    // CORRIGIDO: botão habilitado sempre que não está varrendo/processando e
+    // há diretório definido (inclusive após uma varredura completa, para
+    // permitir reindexar)
+    final bool canScan = isDirectorySet && !isBusy;
 
     return Column(
       spacing: 8.0,
@@ -71,7 +97,7 @@ class IndexingComponent extends StatelessWidget {
           onPressed: canScan
               ? () => context.read<Configuration>().startIndexing()
               : null,
-          icon: isScanning
+          icon: isBusy
               ? const SizedBox(
                   width: 16,
                   height: 16,
@@ -84,6 +110,10 @@ class IndexingComponent extends StatelessWidget {
           label: Text(
             isScanning
                 ? "Varrendo..."
+                : isProcessingMetadata
+                ? "Processando..."
+                : isCalculatingLoudness
+                ? "Calculando volume..."
                 : isComplete
                 ? "Reindexar Biblioteca"
                 : "Iniciar Varredura",

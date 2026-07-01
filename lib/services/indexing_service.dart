@@ -7,6 +7,7 @@ import 'package:mpv_audio_kit/mpv_audio_kit.dart';
 import 'package:music_wave_player/data/music_database.dart';
 import 'package:music_wave_player/models/music_track.dart';
 import 'package:music_wave_player/services/cover_art_service.dart';
+import 'package:music_wave_player/services/loudness_service.dart';
 import 'package:music_wave_player/services/metadata_parser.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -48,24 +49,37 @@ class IndexingService {
     return tracks;
   }
 
-  /// Executa a indexação completa da biblioteca:
-  /// 1. Varre o diretório em batches via isolate
-  /// 2. Lê duração de cada faixa via MPV
-  /// 3. Extrai capas na thread principal
-  /// 4. Persiste no banco e retorna as faixas salvas
+  /// Executa a indexação completa da biblioteca, em três fases visíveis
+  /// ao usuário:
+  /// 1. Varredura e indexação: lista os arquivos e extrai metadados básicos
+  ///    (título, artista, álbum) em batches.
+  /// 2. Processamento de metadados: lê duração, extrai capas e persiste no
+  ///    banco. Sem granularidade de progresso (done/total) por enquanto —
+  ///    reporta só o nome da etapa em andamento.
+  /// 3. Cálculo de loudness: varre apenas as faixas que ainda não têm
+  ///    loudness calculado (novas ou de antes dessa feature existir).
   ///
-  /// [onProgress] é chamado a cada batch com o total parcial de faixas encontradas.
-  /// [onComplete] é chamado ao final com as faixas salvas e a data de scan.
+  /// [onProgress] reporta a fase 1: (faixas processadas, total de arquivos
+  /// encontrados na pasta). É chamado com o total já conhecido antes do
+  /// primeiro batch, para a UI exibir o total desde o início.
+  /// [onMetadataStage] reporta a fase 2: o nome da etapa atual.
+  /// [onLoudnessProgress] reporta a fase 3: (faixas com loudness calculado,
+  /// total de faixas pendentes).
+  /// [onComplete] é chamado ao final das três fases, com as faixas salvas
+  /// e a data de scan.
   /// [onError] é chamado em caso de falha.
   static Future<void> startIndexing({
     required String rootDirectory,
-    required void Function(int count) onProgress,
+    required void Function(int done, int total) onProgress,
+    required void Function(String stage) onMetadataStage,
+    required void Function(int done, int total) onLoudnessProgress,
     required void Function(List<MusicTrack> tracks, DateTime scanDate)
     onComplete,
     required void Function(Object error) onError,
   }) async {
     try {
       final paths = await compute(scanDirectoryForPaths, rootDirectory);
+      onProgress(0, paths.length);
 
       const batchSize = 50;
       final allTracks = <MusicTrack>[];
@@ -74,21 +88,56 @@ class IndexingService {
         final batch = paths.sublist(i, (i + batchSize).clamp(0, paths.length));
         final batchTracks = await compute(buildTracksFromPaths, batch);
         allTracks.addAll(batchTracks);
-        onProgress(allTracks.length);
+        onProgress(allTracks.length, paths.length);
       }
 
+      onMetadataStage('Lendo durações...');
       await _readDurations(allTracks);
+
+      onMetadataStage('Extraindo capas de álbum...');
       await _extractCovers(allTracks);
 
+      onMetadataStage('Salvando no banco de dados...');
       final savedTracks = await MusicDatabase.instance.insertTracks(allTracks);
       final scanDate = DateTime.now();
       await _saveLastScanDate(scanDate);
       await _triggerMediaScan(rootDirectory);
 
+      await _scanMissingLoudness(savedTracks, onProgress: onLoudnessProgress);
+
       onComplete(savedTracks, scanDate);
     } catch (e) {
       onError(e);
       debugPrint('IndexingService erro: $e');
+    }
+  }
+
+  /// Calcula e persiste o loudness apenas das faixas que ainda não possuem
+  /// (loudnessLufs == null). Faixas já salvas em reindexações anteriores
+  /// são ignoradas — só o valor de loudness é preenchido, nunca a faixa
+  /// inteira é reprocessada.
+  static Future<void> _scanMissingLoudness(
+    List<MusicTrack> tracks, {
+    required void Function(int done, int total) onProgress,
+  }) async {
+    final pending = tracks.where((t) => t.loudnessLufs == null).toList();
+    if (pending.isEmpty) return;
+
+    onProgress(0, pending.length);
+
+    for (int i = 0; i < pending.length; i++) {
+      final track = pending[i];
+      if (track.id != null) {
+        try {
+          final lufs = await LoudnessService.scan(track.path);
+          if (lufs != null) {
+            await MusicDatabase.instance.updateLoudness(track.id!, lufs);
+          }
+        } catch (_) {
+          // Falha pontual numa faixa não deve interromper o restante do scan.
+        }
+      }
+      onProgress(i + 1, pending.length);
     }
   }
 

@@ -51,6 +51,7 @@ class RootDirectoryConfigScreen extends StatelessWidget {
     ColorScheme colorScheme = Theme.of(context).colorScheme;
 
     return Scaffold(
+      appBar: AppBar(title: const Text('Biblioteca')),
       body: SafeArea(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,

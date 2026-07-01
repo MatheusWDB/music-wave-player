@@ -54,7 +54,11 @@ class MusicAudioHandler {
     await player.setPrefetchPlaylist(true);
     // Registra a MediaSession imediatamente para que os controles
     // da notificação persistam mesmo antes de uma faixa ser carregada.
-    await player.setMediaSession(const MediaSession());
+    // pauseOnly: evita que o player retome sozinho ao reganhar foco de
+    // áudio (ex: ao desligar um alarme ou minimizar outro app de mídia).
+    await player.setMediaSession(
+      const MediaSession(interruptionPolicy: InterruptionPolicy.pauseOnly),
+    );
   }
 
   void setTimerService(SleepTimerService timerService) {
@@ -67,6 +71,26 @@ class MusicAudioHandler {
 
   void updateFadeOnPauseResume(bool enabled) {
     _fadeOnPauseResume = enabled;
+  }
+
+  // ── Normalização de volume ────────────────────────────────────────────────
+
+  /// Aplica o pré-amp (setVolumeGain) calculado a partir do loudness
+  /// integrado (LUFS) da faixa atual, usando -18 LUFS como referência
+  /// (padrão ReplayGain 2.0).
+  ///
+  /// Se a faixa ainda não tiver loudness calculado (caso raro: tocada antes
+  /// do scan da indexação terminar), o gain é zerado — sem normalização —
+  /// para não travar a reprodução.
+  Future<void> _applyLoudnessGain() async {
+    final lufs = _config.currentTrack?.loudnessLufs;
+    if (lufs == null) {
+      await player.setVolumeGain(0.0);
+      return;
+    }
+    const targetLufs = -18.0;
+    final gain = (targetLufs - lufs).clamp(-24.0, 24.0);
+    await player.setVolumeGain(gain);
   }
 
   // ── Lógica de fade ────────────────────────────────────────────────────────
@@ -231,7 +255,9 @@ class MusicAudioHandler {
       },
     );
 
-    await player.setMediaSession(const MediaSession());
+    await player.setMediaSession(
+      const MediaSession(interruptionPolicy: InterruptionPolicy.pauseOnly),
+    );
 
     if (_config.playbackSpeed != 1.0) {
       await player.setRate(_config.playbackSpeed);
@@ -244,6 +270,8 @@ class MusicAudioHandler {
 
     _config.updateTrackDuration(player.state.duration.inMilliseconds);
     _config.updateCurrentPosition(player.state.position.inMilliseconds);
+
+    await _applyLoudnessGain();
 
     // Prepara volume 0 se crossfade ativo — o fade in acontece no play()
     if (_crossfadeDuration > 0) {

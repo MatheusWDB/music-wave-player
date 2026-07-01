@@ -14,10 +14,6 @@ class MiniPlayerComponent extends StatelessWidget {
     final ColorScheme colorScheme = Theme.of(context).colorScheme;
     final config = context.watch<Configuration>();
 
-    if (config.indexingStatus == IndexingStatus.scanning) {
-      return const SizedBox.shrink();
-    }
-
     final MusicTrack? currentTrack = config.currentTrack;
     if (currentTrack == null) return const SizedBox.shrink();
 

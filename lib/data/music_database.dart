@@ -20,6 +20,7 @@ class MusicDatabase {
   static const String columnIsHidden = 'is_hidden';
   static const String columnRating = 'rating';
   static const String columnAddedAt = 'added_at';
+  static const String columnLoudnessLufs = 'loudness_lufs';
 
   Future<Database> get database async {
     if (_database != null) return _database!;
@@ -32,7 +33,7 @@ class MusicDatabase {
     final path = join(dbPath, filePath);
     return await openDatabase(
       path,
-      version: 7,
+      version: 8,
       onCreate: _createDB,
       onUpgrade: _upgradeDB,
     );
@@ -51,7 +52,8 @@ class MusicDatabase {
         $columnDurationMs INTEGER NOT NULL DEFAULT 0,
         $columnIsHidden   INTEGER NOT NULL DEFAULT 0,
         $columnRating     REAL NOT NULL DEFAULT 0,
-        $columnAddedAt    TEXT
+        $columnAddedAt       TEXT,
+        $columnLoudnessLufs  REAL
       )
     ''');
   }
@@ -86,9 +88,13 @@ class MusicDatabase {
       await db.execute(
         'ALTER TABLE $tableTracks ADD COLUMN $columnAddedAt TEXT',
       );
-      // Preenche faixas existentes com a data atual
       await db.execute(
         "UPDATE $tableTracks SET $columnAddedAt = '${DateTime.now().toIso8601String()}' WHERE $columnAddedAt IS NULL",
+      );
+    }
+    if (oldVersion < 8) {
+      await db.execute(
+        'ALTER TABLE $tableTracks ADD COLUMN $columnLoudnessLufs REAL',
       );
     }
   }
@@ -98,31 +104,84 @@ class MusicDatabase {
     final List<MusicTrack> savedTracks = [];
     final now = DateTime.now().toIso8601String();
 
+    // Carrega todas as faixas existentes indexadas por path para lookup O(1)
+    final existingRows = await db.query(tableTracks);
+    final existingByPath = {
+      for (final row in existingRows)
+        row[columnPath] as String: MusicTrack.fromMap(row),
+    };
+
+    // Paths que vieram da varredura (para remoção de órfãos depois)
+    final incomingPaths = tracks.map((t) => t.path).toSet();
+
     await db.transaction((txn) async {
-      await txn.delete(tableTracks, where: '$columnIsEdited = 0');
-
       for (final track in tracks) {
-        final existing = await txn.query(
-          tableTracks,
-          where: '$columnPath = ?',
-          whereArgs: [track.path],
-          limit: 1,
-        );
-        if (existing.isNotEmpty) {
-          savedTracks.add(MusicTrack.fromMap(existing.first));
-          continue;
+        final existing = existingByPath[track.path];
+
+        if (existing != null) {
+          if (existing.isEdited) {
+            // Metadados editados pelo usuário: preserva título/artista/álbum,
+            // mas atualiza duração e capa (dados técnicos, não editoriais)
+            await txn.update(
+              tableTracks,
+              {
+                columnDurationMs: track.durationMs,
+                columnCoverPath: track.coverPath ?? existing.coverPath,
+              },
+              where: '$columnId = ?',
+              whereArgs: [existing.id],
+            );
+            savedTracks.add(
+              existing.copyWith(
+                durationMs: track.durationMs,
+                coverPath: track.coverPath ?? existing.coverPath,
+              ),
+            );
+          } else {
+            // Faixa não editada: atualiza metadados vindos do arquivo
+            await txn.update(
+              tableTracks,
+              {
+                columnTitle: track.title,
+                columnArtist: track.artist,
+                columnAlbum: track.album,
+                columnDurationMs: track.durationMs,
+                columnCoverPath: track.coverPath ?? existing.coverPath,
+              },
+              where: '$columnId = ?',
+              whereArgs: [existing.id],
+            );
+            savedTracks.add(
+              existing.copyWith(
+                title: track.title,
+                artist: track.artist,
+                album: track.album,
+                durationMs: track.durationMs,
+                coverPath: track.coverPath ?? existing.coverPath,
+              ),
+            );
+          }
+        } else {
+          // Faixa nova: insere com added_at
+          final map = track.toMap();
+          map[columnAddedAt] ??= now;
+          final id = await txn.insert(tableTracks, map);
+          savedTracks.add(track.copyWith(id: id));
         }
+      }
 
-        final map = track.toMap();
-        // Garante que novas faixas sempre tenham added_at
-        map[columnAddedAt] ??= now;
+      // Remove faixas não editadas cujo arquivo não existe mais no disco
+      final orphanIds = existingByPath.entries
+          .where((e) => !incomingPaths.contains(e.key) && !e.value.isEdited)
+          .map((e) => e.value.id!)
+          .toList();
 
-        final id = await txn.insert(
-          tableTracks,
-          map,
-          conflictAlgorithm: ConflictAlgorithm.replace,
+      if (orphanIds.isNotEmpty) {
+        final placeholders = orphanIds.map((_) => '?').join(',');
+        await txn.rawDelete(
+          'DELETE FROM $tableTracks WHERE $columnId IN ($placeholders)',
+          orphanIds,
         );
-        savedTracks.add(track.copyWith(id: id));
       }
     });
 
@@ -171,6 +230,16 @@ class MusicDatabase {
     await db.update(
       tableTracks,
       {columnRating: rating},
+      where: '$columnId = ?',
+      whereArgs: [id],
+    );
+  }
+
+  Future<void> updateLoudness(int id, double lufs) async {
+    final db = await instance.database;
+    await db.update(
+      tableTracks,
+      {columnLoudnessLufs: lufs},
       where: '$columnId = ?',
       whereArgs: [id],
     );
