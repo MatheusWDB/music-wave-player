@@ -131,6 +131,7 @@ class _BandsRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final bands = config.eqBandDefinitions;
     final gains = config.eqBandGains;
+    final configReader = context.read<Configuration>();
 
     return Row(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -142,8 +143,10 @@ class _BandsRow extends StatelessWidget {
             minGain: config.eqMinGain,
             maxGain: config.eqMaxGain,
             flatGain: config.eqFlatGain,
-            onChanged: (v) =>
-                context.read<Configuration>().setEqBandGain(index, v),
+            // Durante o arraste: só preview (memória + throttle no áudio).
+            onChanged: (v) => configReader.previewEqBandGain(index, v),
+            // Ao soltar: persiste e garante o valor final aplicado.
+            onChangeEnd: (v) => configReader.setEqBandGain(index, v),
           ),
         );
       }),
@@ -158,6 +161,7 @@ class _BandSlider extends StatelessWidget {
   final double maxGain;
   final double flatGain;
   final ValueChanged<double> onChanged;
+  final ValueChanged<double> onChangeEnd;
 
   const _BandSlider({
     required this.label,
@@ -166,6 +170,7 @@ class _BandSlider extends StatelessWidget {
     required this.maxGain,
     required this.flatGain,
     required this.onChanged,
+    required this.onChangeEnd,
   });
 
   @override
@@ -198,6 +203,7 @@ class _BandSlider extends StatelessWidget {
                 activeColor: colorScheme.primary,
                 inactiveColor: colorScheme.primary.withValues(alpha: 0.2),
                 onChanged: onChanged,
+                onChangeEnd: onChangeEnd,
               ),
             ),
           ),

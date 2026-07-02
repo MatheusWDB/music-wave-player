@@ -206,13 +206,24 @@ class EqualizerService {
     await _persistPresetAndBands();
   }
 
-  /// Ajusta uma banda manualmente. Muda o preset ativo para [EqualizerPreset.manual].
+  /// Ajusta uma banda manualmente e persiste. Muda o preset ativo para
+  /// [EqualizerPreset.manual]. Chamado ao soltar o slider (onChangeEnd).
   Future<void> setBandGain(int index, double gain) async {
     if (index < 0 || index >= _bandGains.length) return;
     _bandGains[index] = gain.clamp(minGain, maxGain);
     _activePreset = EqualizerPreset.manual;
     onStateChanged();
     await _persistPresetAndBands();
+  }
+
+  /// Atualiza o ganho apenas em memória, sem persistir em disco. Usado
+  /// durante o arraste do slider — a persistência (custosa e desnecessária
+  /// a cada frame) ocorre só em [setBandGain], chamado ao soltar o dedo.
+  void previewBandGain(int index, double gain) {
+    if (index < 0 || index >= _bandGains.length) return;
+    _bandGains[index] = gain.clamp(minGain, maxGain);
+    _activePreset = EqualizerPreset.manual;
+    onStateChanged();
   }
 
   Future<void> reset() async {

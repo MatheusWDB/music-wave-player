@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:music_wave_player/data/music_database.dart';
@@ -66,6 +68,11 @@ class Configuration with ChangeNotifier, DiagnosticableTreeMixin {
   double _playbackSpeed = 1.0;
   int _crossfadeDuration = 0;
   bool _fadeOnPauseResume = false;
+
+  // Throttle da aplicação do EQ no áudio durante o arraste do slider —
+  // evita reconfigurar a cadeia de filtros do ffmpeg a cada frame.
+  Timer? _eqApplyTimer;
+  bool _eqApplyPending = false;
 
   Configuration.empty() {
     _queue = QueueManager();
@@ -479,12 +486,47 @@ class Configuration with ChangeNotifier, DiagnosticableTreeMixin {
     );
   }
 
+  /// Chamado a cada movimento do slider (onChanged). Atualiza a banda só em
+  /// memória e aplica no áudio com throttle, para manter o arraste fluido
+  /// sem sobrecarregar o ffmpeg reconfigurando a cadeia de filtros a cada frame.
+  void previewEqBandGain(int index, double gain) {
+    _equalizer.previewBandGain(index, gain);
+    _throttledApplyEqualizer();
+  }
+
+  /// Chamado ao soltar o slider (onChangeEnd). Persiste o valor final e
+  /// garante que o áudio reflita exatamente o último valor escolhido.
   Future<void> setEqBandGain(int index, double gain) async {
+    _eqApplyTimer?.cancel();
+    _eqApplyTimer = null;
+    _eqApplyPending = false;
     await _equalizer.setBandGain(index, gain);
+    await _applyEqualizerToAudio();
+  }
+
+  Future<void> _applyEqualizerToAudio() async {
     await _audioHandler?.applyEqualizer(
       _equalizer.enabled,
       _equalizer.superequalizerParams,
     );
+  }
+
+  /// Throttle leading+trailing: aplica imediatamente na primeira chamada,
+  /// depois no máximo uma vez a cada 120ms, garantindo que o último valor
+  /// arrastado sempre seja aplicado ao final (chamada trailing).
+  void _throttledApplyEqualizer() {
+    if (_eqApplyTimer != null) {
+      _eqApplyPending = true;
+      return;
+    }
+    _applyEqualizerToAudio();
+    _eqApplyTimer = Timer(const Duration(milliseconds: 120), () {
+      _eqApplyTimer = null;
+      if (_eqApplyPending) {
+        _eqApplyPending = false;
+        _throttledApplyEqualizer();
+      }
+    });
   }
 
   Future<void> resetEqualizer() async {
