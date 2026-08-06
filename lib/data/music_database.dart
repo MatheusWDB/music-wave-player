@@ -99,7 +99,40 @@ class MusicDatabase {
     }
   }
 
-  Future<List<MusicTrack>> insertTracks(List<MusicTrack> tracks) async {
+  /// Varredura completa do diretório: insere/atualiza as faixas recebidas e
+  /// REMOVE do banco qualquer faixa não editada ausente da lista — assume
+  /// que [tracks] representa o conteúdo inteiro do diretório indexado.
+  ///
+  /// [onTracksRemoved] é chamado com os IDs das faixas removidas por não
+  /// existirem mais na varredura, permitindo que o chamador limpe dados
+  /// relacionados (ex: sessões de reprodução, que ficariam órfãs).
+  ///
+  /// Para inserir/atualizar um subconjunto pontual sem apagar o resto
+  /// (ex: restauração de backup), use [upsertTracks].
+  Future<List<MusicTrack>> insertTracks(
+    List<MusicTrack> tracks, {
+    void Function(List<int> removedTrackIds)? onTracksRemoved,
+  }) {
+    return _upsertTracks(
+      tracks,
+      pruneOrphans: true,
+      onTracksRemoved: onTracksRemoved,
+    );
+  }
+
+  /// Insere ou atualiza as faixas recebidas sem remover nada do banco.
+  /// Usado para recriar faixas pontuais (ex: restauração de backup), onde
+  /// as faixas passadas são só um subconjunto da biblioteca, não uma
+  /// varredura completa.
+  Future<List<MusicTrack>> upsertTracks(List<MusicTrack> tracks) {
+    return _upsertTracks(tracks, pruneOrphans: false);
+  }
+
+  Future<List<MusicTrack>> _upsertTracks(
+    List<MusicTrack> tracks, {
+    required bool pruneOrphans,
+    void Function(List<int> removedTrackIds)? onTracksRemoved,
+  }) async {
     final db = await instance.database;
     final List<MusicTrack> savedTracks = [];
     final now = DateTime.now().toIso8601String();
@@ -111,8 +144,8 @@ class MusicDatabase {
         row[columnPath] as String: MusicTrack.fromMap(row),
     };
 
-    // Paths que vieram da varredura (para remoção de órfãos depois)
     final incomingPaths = tracks.map((t) => t.path).toSet();
+    List<int> removedIds = const [];
 
     await db.transaction((txn) async {
       for (final track in tracks) {
@@ -170,7 +203,11 @@ class MusicDatabase {
         }
       }
 
-      // Remove faixas não editadas cujo arquivo não existe mais no disco
+      if (!pruneOrphans) return;
+
+      // Remove faixas não editadas cujo arquivo não existe mais no disco —
+      // só é seguro quando [tracks] representa a varredura completa do
+      // diretório, nunca em upserts parciais.
       final orphanIds = existingByPath.entries
           .where((e) => !incomingPaths.contains(e.key) && !e.value.isEdited)
           .map((e) => e.value.id!)
@@ -182,8 +219,13 @@ class MusicDatabase {
           'DELETE FROM $tableTracks WHERE $columnId IN ($placeholders)',
           orphanIds,
         );
+        removedIds = orphanIds;
       }
     });
+
+    if (removedIds.isNotEmpty) {
+      onTracksRemoved?.call(removedIds);
+    }
 
     return savedTracks;
   }
@@ -203,6 +245,19 @@ class MusicDatabase {
   Future<List<MusicTrack>> readHiddenTracks() async {
     final db = await instance.database;
     final result = await db.query(tableTracks, where: '$columnIsHidden = 1');
+    final tracks = result.map((m) => MusicTrack.fromMap(m)).toList();
+    tracks.sort(
+      (a, b) => naturalCompare(a.title.toLowerCase(), b.title.toLowerCase()),
+    );
+    return tracks;
+  }
+
+  /// Retorna todas as faixas, visíveis e ocultas — usado no export de
+  /// backup, que precisa registrar rating/hidden mesmo de faixas ocultas
+  /// e resolver referências de playlists/sessões que apontem para elas.
+  Future<List<MusicTrack>> readAllTracksIncludingHidden() async {
+    final db = await instance.database;
+    final result = await db.query(tableTracks);
     final tracks = result.map((m) => MusicTrack.fromMap(m)).toList();
     tracks.sort(
       (a, b) => naturalCompare(a.title.toLowerCase(), b.title.toLowerCase()),

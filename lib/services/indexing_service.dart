@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:mpv_audio_kit/mpv_audio_kit.dart';
 import 'package:music_wave_player/data/music_database.dart';
+import 'package:music_wave_player/data/play_session_database.dart';
 import 'package:music_wave_player/models/music_track.dart';
 import 'package:music_wave_player/services/cover_art_service.dart';
 import 'package:music_wave_player/services/loudness_service.dart';
@@ -98,7 +99,18 @@ class IndexingService {
       await _extractCovers(allTracks);
 
       onMetadataStage('Salvando no banco de dados...');
-      final savedTracks = await MusicDatabase.instance.insertTracks(allTracks);
+      final savedTracks = await MusicDatabase.instance.insertTracks(
+        allTracks,
+        onTracksRemoved: (removedIds) async {
+          // Faixas removidas por não existirem mais na varredura deixam
+          // suas sessões de reprodução órfãs — limpa junto para não
+          // acumular dados que nunca mais serão exibidos em estatísticas
+          // ou no backup.
+          await PlaySessionDatabase.instance.deleteSessionsForTracks(
+            removedIds,
+          );
+        },
+      );
       final scanDate = DateTime.now();
       await _saveLastScanDate(scanDate);
       await _triggerMediaScan(rootDirectory);

@@ -45,6 +45,7 @@ dependencies:
   ffmpeg_kit_flutter_new: ^4.2.1
   share_plus: ^12.0.2
   mpv_audio_kit: ^0.4.2
+  file_saver: ^0.4.0
 
 dev_dependencies:
   flutter_test:

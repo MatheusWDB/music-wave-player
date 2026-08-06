@@ -12,6 +12,28 @@ const Color colorHighlight = Color(0xFF457B9D);
 const Color colorAccent = Color(0xFFA8DADC);
 const Color colorAction = Color(0xFFE63946);
 
+/// Chave global do ScaffoldMessenger — permite mostrar feedback (SnackBar)
+/// para operações assíncronas de longa duração (ex: restauração de backup)
+/// mesmo que a tela que as iniciou já tenha sido fechada.
+final GlobalKey<ScaffoldMessengerState> rootMessengerKey =
+    GlobalKey<ScaffoldMessengerState>();
+
+/// Helper para mostrar feedback global, independente de qual tela está
+/// ativa no momento.
+class AppMessenger {
+  AppMessenger._();
+
+  static void show(String message, {bool isError = false}) {
+    rootMessengerKey.currentState?.showSnackBar(
+      SnackBar(
+        content: Text(message),
+        behavior: SnackBarBehavior.floating,
+        backgroundColor: isError ? colorAction : colorHighlight,
+      ),
+    );
+  }
+}
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
@@ -47,6 +69,7 @@ class MyApp extends StatelessWidget {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       title: 'MusicWave Player',
+      scaffoldMessengerKey: rootMessengerKey,
       theme: ThemeData(
         brightness: Brightness.dark,
         colorScheme: const ColorScheme(

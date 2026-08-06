@@ -4,6 +4,7 @@ import 'package:music_wave_player/components/tabs_component.dart';
 import 'package:music_wave_player/components/audio_transitions_bottom_sheet.dart';
 import 'package:music_wave_player/components/recap_widget.dart';
 import 'package:music_wave_player/models/configuration.dart';
+import 'package:music_wave_player/screens/backup_restore_screen.dart';
 import 'package:music_wave_player/screens/equalizer_screen.dart';
 import 'package:music_wave_player/screens/hidden_tracks_screen.dart';
 import 'package:music_wave_player/screens/most_played_screen.dart';
@@ -194,6 +195,15 @@ class _AppMenu extends StatelessWidget {
               title: const Text('Adicionadas recentemente'),
               subtitle: const Text('Músicas indexadas mais recentemente'),
               onTap: () => go(const RecentlyAddedScreen()),
+            ),
+            ListTile(
+              leading: Icon(
+                Icons.settings_backup_restore_outlined,
+                color: colorScheme.primary,
+              ),
+              title: const Text('Backup e Restauração'),
+              subtitle: const Text('Exportar ou restaurar seus dados'),
+              onTap: () => go(const BackupRestoreScreen()),
             ),
             SizedBox(height: 16 + bottomInset),
           ],

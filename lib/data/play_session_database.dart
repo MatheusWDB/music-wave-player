@@ -1,6 +1,20 @@
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart';
 
+/// Registro bruto de uma sessão de reprodução — usado no export de backup,
+/// que precisa dos dados crus (não agregados) para reconstruir o histórico.
+class PlaySessionRecord {
+  final int trackId;
+  final int secondsPlayed;
+  final String playedAt;
+
+  const PlaySessionRecord({
+    required this.trackId,
+    required this.secondsPlayed,
+    required this.playedAt,
+  });
+}
+
 class PlaySessionDatabase {
   static final PlaySessionDatabase instance = PlaySessionDatabase._init();
   static Database? _database;
@@ -54,6 +68,75 @@ class PlaySessionDatabase {
       columnSecondsPlayed: secondsPlayed,
       columnPlayedAt: DateTime.now().toIso8601String(),
     });
+  }
+
+  /// Insere ou atualiza uma sessão vinda de um backup restaurado.
+  ///
+  /// Se já existir uma sessão com o mesmo (trackId, playedAt), mantém o
+  /// maior seconds_played entre a existente e a do backup — evita inflar
+  /// as estatísticas caso o mesmo backup seja restaurado mais de uma vez.
+  Future<void> upsertSession({
+    required int trackId,
+    required int secondsPlayed,
+    required String playedAt,
+  }) async {
+    final db = await database;
+    final existing = await db.query(
+      tableSessions,
+      where: '$columnTrackId = ? AND $columnPlayedAt = ?',
+      whereArgs: [trackId, playedAt],
+      limit: 1,
+    );
+
+    if (existing.isEmpty) {
+      await db.insert(tableSessions, {
+        columnTrackId: trackId,
+        columnSecondsPlayed: secondsPlayed,
+        columnPlayedAt: playedAt,
+      });
+      return;
+    }
+
+    final currentSeconds = existing.first[columnSecondsPlayed] as int? ?? 0;
+    if (secondsPlayed > currentSeconds) {
+      await db.update(
+        tableSessions,
+        {columnSecondsPlayed: secondsPlayed},
+        where: '$columnId = ?',
+        whereArgs: [existing.first[columnId]],
+      );
+    }
+  }
+
+  /// Remove todas as sessões associadas aos [trackIds] informados.
+  ///
+  /// Usado quando faixas são removidas do banco por não existirem mais no
+  /// disco (reindexação com mudança de diretório) — sem isso, as sessões
+  /// ficam órfãs, referenciando um track_id que não existe mais, e nunca
+  /// mais aparecem em estatísticas ou no backup.
+  Future<void> deleteSessionsForTracks(List<int> trackIds) async {
+    if (trackIds.isEmpty) return;
+    final db = await database;
+    final placeholders = trackIds.map((_) => '?').join(',');
+    await db.rawDelete(
+      'DELETE FROM $tableSessions WHERE $columnTrackId IN ($placeholders)',
+      trackIds,
+    );
+  }
+
+  /// Retorna todas as sessões em formato bruto — usado no export de backup.
+  Future<List<PlaySessionRecord>> readAllSessions() async {
+    final db = await database;
+    final rows = await db.query(tableSessions);
+    return rows
+        .map(
+          (r) => PlaySessionRecord(
+            trackId: r[columnTrackId] as int,
+            secondsPlayed: r[columnSecondsPlayed] as int,
+            playedAt: r[columnPlayedAt] as String,
+          ),
+        )
+        .toList();
   }
 
   /// Retorna tempo total ouvido por música dentro de um período.
