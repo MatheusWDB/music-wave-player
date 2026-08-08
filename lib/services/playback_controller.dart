@@ -97,11 +97,21 @@ class PlaybackController {
       await _saveLastPlayedMusicId(musicId);
       await _audioHandler?.loadTrack(trackPath);
       onTrackChanged(musicId, trackPath);
+
+      _isPlaying = true;
+      onStateChanged();
+      _audioHandler?.play();
+      return;
     }
 
-    _isPlaying = true;
-    onStateChanged();
-    _audioHandler?.play();
+    // Mesma faixa que já está carregada: só retoma se estava pausada.
+    // Evita re-chamar play() (e o fade associado) quando o usuário apenas
+    // toca numa música que já está tocando para abrir o Full Player.
+    if (!_isPlaying) {
+      _isPlaying = true;
+      onStateChanged();
+      _audioHandler?.play();
+    }
   }
 
   Future<void> playPlaylist(
@@ -188,10 +198,10 @@ class PlaybackController {
     onStateChanged();
 
     if (_isPlaying) {
-      // Se o player completou a faixa (ex: temporizador pausou no fim),
-      // avança para a próxima em vez de retomar do zero
-      final isCompleted = _audioHandler?.player.state.completed ?? false;
-      if (isCompleted) {
+      // Se a pausa atual veio do temporizador ao fim da faixa, avança para
+      // a próxima em vez de retomar do zero (ver consumePausedAtTrackEnd).
+      final pausedAtEnd = _audioHandler?.consumePausedAtTrackEnd() ?? false;
+      if (pausedAtEnd) {
         playNextTrack(indexedTracks: indexedTracks);
       } else {
         _audioHandler?.play();

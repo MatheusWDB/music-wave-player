@@ -32,7 +32,16 @@ class MusicAudioHandler {
 
   Timer? _periodicSaveTimer;
 
+  // Marca quando a pausa atual foi causada pelo temporizador ao atingir o
+  // fim natural da faixa (ver _completedSub). Necessário porque o mpv, sem
+  // keep-open configurado, reseta position/completed para 0 ao chegar no
+  // EOF — tornando esses estados não confiáveis para decidir, num play()
+  // manual posterior, se deve retomar a faixa atual ou avançar para a
+  // próxima.
+  bool _pausedAtTrackEnd = false;
+
   int? _sessionTrackId;
+  int? _sessionRowId;
   int _sessionSecondsAccumulated = 0;
   int _sessionSecondsSaved = 0;
   DateTime? _sessionStartedAt;
@@ -54,15 +63,24 @@ class MusicAudioHandler {
     await player.setPrefetchPlaylist(true);
     // Registra a MediaSession imediatamente para que os controles
     // da notificação persistam mesmo antes de uma faixa ser carregada.
-    // pauseOnly: evita que o player retome sozinho ao reganhar foco de
-    // áudio (ex: ao desligar um alarme ou minimizar outro app de mídia).
+    // pauseAndResume: retoma automaticamente ao reganhar foco de áudio
+    // (ex: após uma ligação ou alarme terminar).
     await player.setMediaSession(
-      const MediaSession(interruptionPolicy: InterruptionPolicy.pauseOnly),
+      const MediaSession(interruptionPolicy: InterruptionPolicy.pauseAndResume),
     );
   }
 
   void setTimerService(SleepTimerService timerService) {
     _timerService = timerService;
+  }
+
+  /// Retorna true se a pausa atual foi causada pelo temporizador ao fim da
+  /// faixa, e reseta a flag (consumo único). Ver comentário do campo
+  /// [_pausedAtTrackEnd].
+  bool consumePausedAtTrackEnd() {
+    final value = _pausedAtTrackEnd;
+    _pausedAtTrackEnd = false;
+    return value;
   }
 
   void updateCrossfade(int durationSeconds) {
@@ -214,11 +232,25 @@ class MusicAudioHandler {
 
     // Quando a faixa termina naturalmente, o fade out já foi feito pelo
     // listener de posição — só avança para a próxima.
+    //
+    // Filtro extra: alguns wrappers do libmpv emitem 'completed=true'
+    // residual logo após um open() (ex: ao carregar a faixa seguinte),
+    // mesmo sem a faixa ter de fato chegado ao fim. Sem essa checagem,
+    // isso causava avanço espúrio de faixa em loop — mais perceptível em
+    // faixas curtas, onde a margem entre "carregada" e "fim" é pequena.
     _completedSub = player.stream.completed.listen((completed) {
       if (!completed) return;
 
+      final duration = player.state.duration;
+      final position = player.state.position;
+      final isNearEnd =
+          duration > Duration.zero &&
+          (duration - position).inMilliseconds <= 800;
+      if (!isNearEnd) return;
+
       final shouldPause = _timerService?.onTrackFinished() ?? false;
       if (shouldPause) {
+        _pausedAtTrackEnd = true;
         player.pause();
         return;
       }
@@ -233,6 +265,18 @@ class MusicAudioHandler {
           skipToPrevious();
         case MediaSessionCommandSeekTo(:final position):
           seek(position);
+        case MediaSessionCommandPlay():
+        case MediaSessionCommandPlayPause():
+          // O mpv_audio_kit auto-aplica play()/pause() no player nativo
+          // ANTES de emitir este evento (ver player_media_session.part.dart
+          // do pacote), sem passar pelo nosso fluxo (PlaybackController).
+          // Se a pausa atual veio do temporizador ao fim da faixa, esse
+          // play() nativo só retomou a faixa já finalizada do zero —
+          // corrige aqui chamando a mesma lógica de avanço/repetição usada
+          // no fim natural da faixa.
+          if (consumePausedAtTrackEnd()) {
+            _config.trackDidFinish();
+          }
         default:
           break;
       }
@@ -242,6 +286,7 @@ class MusicAudioHandler {
   // ── Controles de reprodução ───────────────────────────────────────────────
 
   Future<void> loadTrack(String path) async {
+    _pausedAtTrackEnd = false;
     // Cancela qualquer fade em andamento e reseta flags para a nova faixa
     _crossfadeTimer?.cancel();
     _crossfadeInProgress = false;
@@ -273,7 +318,7 @@ class MusicAudioHandler {
     );
 
     await player.setMediaSession(
-      const MediaSession(interruptionPolicy: InterruptionPolicy.pauseOnly),
+      const MediaSession(interruptionPolicy: InterruptionPolicy.pauseAndResume),
     );
 
     if (_config.playbackSpeed != 1.0) {
@@ -367,41 +412,63 @@ class MusicAudioHandler {
 
   void _startSession(int trackId) {
     _sessionTrackId = trackId;
+    _sessionRowId = null;
     _sessionSecondsAccumulated = 0;
     _sessionSecondsSaved = 0;
     _sessionStartedAt = null;
   }
 
+  /// Persiste o total acumulado da sessão atual: insere a linha uma única
+  /// vez (no primeiro save com segundos > 0) e, dali em diante, apenas
+  /// atualiza essa mesma linha — em vez de inserir uma linha nova a cada
+  /// save periódico (5s), o que inflava a tabela em sessões longas sem
+  /// necessidade (estatísticas usam SUM, então a granularidade por save
+  /// nunca foi observável para o usuário).
   Future<void> _saveSessionDelta() async {
     if (_sessionTrackId == null) return;
     int current = _sessionSecondsAccumulated;
     if (_sessionStartedAt != null) {
       current += DateTime.now().difference(_sessionStartedAt!).inSeconds;
     }
-    final delta = current - _sessionSecondsSaved;
-    if (delta <= 0) return;
-    await PlaySessionDatabase.instance.insertSession(
-      trackId: _sessionTrackId!,
-      secondsPlayed: delta,
-    );
-    _sessionSecondsSaved += delta;
+    if (current <= 0 || current == _sessionSecondsSaved) return;
+
+    if (_sessionRowId == null) {
+      _sessionRowId = await PlaySessionDatabase.instance.insertSession(
+        trackId: _sessionTrackId!,
+        secondsPlayed: current,
+      );
+    } else {
+      await PlaySessionDatabase.instance.updateSessionSeconds(
+        id: _sessionRowId!,
+        secondsPlayed: current,
+      );
+    }
+    _sessionSecondsSaved = current;
   }
 
   Future<void> _flushSession() async {
     _pauseSession();
     final trackId = _sessionTrackId;
     if (trackId != null) {
-      final remaining = _sessionSecondsAccumulated - _sessionSecondsSaved;
-      if (remaining > 0) {
-        await PlaySessionDatabase.instance.insertSession(
-          trackId: trackId,
-          secondsPlayed: remaining,
-        );
+      final total = _sessionSecondsAccumulated;
+      if (total > 0 && total != _sessionSecondsSaved) {
+        if (_sessionRowId == null) {
+          await PlaySessionDatabase.instance.insertSession(
+            trackId: trackId,
+            secondsPlayed: total,
+          );
+        } else {
+          await PlaySessionDatabase.instance.updateSessionSeconds(
+            id: _sessionRowId!,
+            secondsPlayed: total,
+          );
+        }
       }
     }
     _sessionSecondsAccumulated = 0;
     _sessionSecondsSaved = 0;
     _sessionTrackId = null;
+    _sessionRowId = null;
     _sessionStartedAt = null;
   }
 

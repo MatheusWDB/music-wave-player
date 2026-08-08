@@ -8,6 +8,7 @@ import 'package:music_wave_player/models/playlist.dart';
 import 'package:music_wave_player/services/equalizer_service.dart';
 import 'package:music_wave_player/services/favorites_service.dart';
 import 'package:music_wave_player/services/indexing_service.dart';
+import 'package:music_wave_player/services/metadata_repair_service.dart';
 import 'package:music_wave_player/services/music_audio_handler.dart';
 import 'package:music_wave_player/services/playback_controller.dart';
 import 'package:music_wave_player/services/queue_manager.dart';
@@ -199,6 +200,8 @@ class Configuration with ChangeNotifier, DiagnosticableTreeMixin {
       _fadeOnPauseResume = prefs.getBool(_kFadeOnPauseResumeKey) ?? false;
 
       await _equalizer.loadFromStorage();
+
+      await MetadataRepairService.runIfNeeded();
 
       await loadIndexedTracks();
 

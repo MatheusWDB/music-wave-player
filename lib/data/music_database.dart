@@ -300,6 +300,26 @@ class MusicDatabase {
     );
   }
 
+  /// Atualiza título/artista/álbum sem marcar a faixa como editada pelo
+  /// usuário. Usado pelo [MetadataRepairService] para corrigir metadados
+  /// extraídos incorretamente (ex: bug de acentuação), preservando a
+  /// possibilidade de a faixa ser atualizada normalmente em reindexações
+  /// futuras — diferente de [updateTrack], que seta is_edited = 1.
+  Future<void> updateRawMetadata({
+    required int id,
+    required String title,
+    required String artist,
+    required String album,
+  }) async {
+    final db = await instance.database;
+    await db.update(
+      tableTracks,
+      {columnTitle: title, columnArtist: artist, columnAlbum: album},
+      where: '$columnId = ?',
+      whereArgs: [id],
+    );
+  }
+
   Future<void> updateTrack({
     required int id,
     required String title,

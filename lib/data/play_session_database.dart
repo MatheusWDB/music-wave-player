@@ -56,18 +56,36 @@ class PlaySessionDatabase {
     );
   }
 
-  /// Registra uma sessão de reprodução.
-  Future<void> insertSession({
+  /// Registra uma sessão de reprodução. Retorna o id da linha inserida,
+  /// ou null se [secondsPlayed] for <= 0 (nada inserido).
+  Future<int?> insertSession({
     required int trackId,
     required int secondsPlayed,
   }) async {
-    if (secondsPlayed <= 0) return;
+    if (secondsPlayed <= 0) return null;
     final db = await database;
-    await db.insert(tableSessions, {
+    return await db.insert(tableSessions, {
       columnTrackId: trackId,
       columnSecondsPlayed: secondsPlayed,
       columnPlayedAt: DateTime.now().toIso8601String(),
     });
+  }
+
+  /// Atualiza o total de segundos de uma sessão já existente (identificada
+  /// por [id]). Usado para consolidar saves periódicos numa única linha por
+  /// playthrough, em vez de inserir uma linha nova a cada save — evita
+  /// inflar a tabela em sessões longas (ver [MusicAudioHandler]).
+  Future<void> updateSessionSeconds({
+    required int id,
+    required int secondsPlayed,
+  }) async {
+    final db = await database;
+    await db.update(
+      tableSessions,
+      {columnSecondsPlayed: secondsPlayed},
+      where: '$columnId = ?',
+      whereArgs: [id],
+    );
   }
 
   /// Insere ou atualiza uma sessão vinda de um backup restaurado.

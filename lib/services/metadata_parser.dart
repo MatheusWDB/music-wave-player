@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:music_wave_player/models/music_track.dart';
@@ -84,19 +85,8 @@ class MetadataParser {
         if (frameId == 'TIT2' || frameId == 'TPE1' || frameId == 'TALB') {
           final encoding = tagData[pos];
           final contentBytes = tagData.sublist(pos + 1, pos + frameSize);
-          String text;
+          final text = _decodeId3Text(encoding, contentBytes).trim();
 
-          if (encoding == 1 || encoding == 2) {
-            final bom = contentBytes.length >= 2
-                ? (contentBytes[0] << 8 | contentBytes[1])
-                : 0;
-            final start = (bom == 0xFFFE || bom == 0xFEFF) ? 2 : 0;
-            text = _decodeUtf16(contentBytes.sublist(start));
-          } else {
-            text = String.fromCharCodes(contentBytes.where((b) => b != 0));
-          }
-
-          text = text.trim();
           if (text.isNotEmpty) {
             if (frameId == 'TIT2') result['title'] = text;
             if (frameId == 'TPE1') result['artist'] = text;
@@ -110,6 +100,32 @@ class MetadataParser {
       await raf.close();
     }
     return result;
+  }
+
+  /// Decodifica o texto de um frame ID3v2 conforme o byte de encoding:
+  ///   0 = ISO-8859-1 (Latin-1)
+  ///   1 = UTF-16 com BOM
+  ///   2 = UTF-16BE sem BOM
+  ///   3 = UTF-8
+  static String _decodeId3Text(int encoding, List<int> bytes) {
+    switch (encoding) {
+      case 1:
+      case 2:
+        final bom = bytes.length >= 2 ? (bytes[0] << 8 | bytes[1]) : 0;
+        final start = (bom == 0xFFFE || bom == 0xFEFF) ? 2 : 0;
+        return _decodeUtf16(bytes.sublist(start));
+      case 3:
+        try {
+          // Remove terminador nulo, se houver, antes de decodificar
+          final trimmed = bytes.where((b) => b != 0).toList();
+          return utf8.decode(trimmed, allowMalformed: true);
+        } catch (_) {
+          return latin1.decode(bytes.where((b) => b != 0).toList());
+        }
+      case 0:
+      default:
+        return latin1.decode(bytes.where((b) => b != 0).toList());
+    }
   }
 
   static String _decodeUtf16(List<int> bytes) {
@@ -173,6 +189,8 @@ class MetadataParser {
     }
   }
 
+  /// Lê a caixa `data` dentro de uma caixa de metadado iTunes (ex: ©nam).
+  /// O conteúdo textual é sempre UTF-8 pela especificação do formato.
   static String? _readItunesStringBox(List<int> bytes, int offset, int limit) {
     int pos = offset;
     while (pos + 8 <= limit) {
@@ -184,9 +202,13 @@ class MetadataParser {
       );
 
       if (name == 'data' && size > 16) {
-        final text = String.fromCharCodes(
-          bytes.sublist(pos + 16, pos + size),
-        ).trim();
+        final rawBytes = bytes.sublist(pos + 16, pos + size);
+        String text;
+        try {
+          text = utf8.decode(rawBytes, allowMalformed: true).trim();
+        } catch (_) {
+          text = latin1.decode(rawBytes).trim();
+        }
         return text.isNotEmpty ? text : null;
       }
 
