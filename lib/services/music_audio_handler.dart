@@ -63,10 +63,23 @@ class MusicAudioHandler {
     await player.setPrefetchPlaylist(true);
     // Registra a MediaSession imediatamente para que os controles
     // da notificação persistam mesmo antes de uma faixa ser carregada.
-    // pauseAndResume: retoma automaticamente ao reganhar foco de áudio
-    // (ex: após uma ligação ou alarme terminar).
-    await player.setMediaSession(
-      const MediaSession(interruptionPolicy: InterruptionPolicy.pauseAndResume),
+    // Começa em pauseOnly (nada tocando ainda) — a política é reajustada
+    // dinamicamente em _playingSub conforme o estado real de reprodução.
+    await player.setMediaSession(_mediaSessionFor(playing: false));
+  }
+
+  /// Monta a configuração da MediaSession com a política de interrupção
+  /// correta para o momento: [InterruptionPolicy.pauseAndResume] só quando
+  /// já havia áudio tocando antes da interrupção (ex: ligação, alarme) —
+  /// caso contrário [InterruptionPolicy.pauseOnly], para não iniciar
+  /// reprodução do nada quando o app está parado e uma interrupção externa
+  /// termina. A política é reenviada dinamicamente a cada mudança real de
+  /// estado de reprodução (ver [_playingSub]), não fixada uma vez só.
+  MediaSession _mediaSessionFor({required bool playing}) {
+    return MediaSession(
+      interruptionPolicy: playing
+          ? InterruptionPolicy.pauseAndResume
+          : InterruptionPolicy.pauseOnly,
     );
   }
 
@@ -228,6 +241,7 @@ class MusicAudioHandler {
         _stopPeriodicSave();
       }
       _config.syncPlayingState(playing);
+      player.setMediaSession(_mediaSessionFor(playing: playing));
     });
 
     // Quando a faixa termina naturalmente, o fade out já foi feito pelo
@@ -315,10 +329,6 @@ class MusicAudioHandler {
       onTimeout: () {
         sub?.cancel();
       },
-    );
-
-    await player.setMediaSession(
-      const MediaSession(interruptionPolicy: InterruptionPolicy.pauseAndResume),
     );
 
     if (_config.playbackSpeed != 1.0) {
