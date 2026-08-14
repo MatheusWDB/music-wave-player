@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:music_wave_player/components/cover_art_widget.dart';
+import 'package:music_wave_player/components/listening_stats_section.dart';
 import 'package:music_wave_player/components/rating_bottom_sheet.dart';
 import 'package:music_wave_player/data/play_session_database.dart';
 import 'package:music_wave_player/models/configuration.dart';
@@ -25,7 +26,7 @@ class _AlbumDetailScreenState extends State<AlbumDetailScreen> {
   late List<MusicTrack> _tracks;
 
   // Estatísticas
-  _StatsPeriod _selectedPeriod = _StatsPeriod.lastMonth;
+  StatsPeriod _selectedPeriod = StatsPeriod.lastMonth;
   int? _selectedYear;
   List<int> _availableYears = [];
   Map<int, int> _trackSeconds = {};
@@ -57,40 +58,31 @@ class _AlbumDetailScreenState extends State<AlbumDetailScreen> {
 
   (DateTime, DateTime) _dateRange() {
     final now = DateTime.now();
-    if (_selectedPeriod == _StatsPeriod.year && _selectedYear != null) {
+    if (_selectedPeriod == StatsPeriod.year && _selectedYear != null) {
       return (
         DateTime(_selectedYear!),
         DateTime(_selectedYear! + 1).subtract(const Duration(milliseconds: 1)),
       );
     }
     return switch (_selectedPeriod) {
-      _StatsPeriod.lastMonth => (
+      StatsPeriod.lastMonth => (
         DateTime(now.year, now.month - 1, now.day),
         now,
       ),
-      _StatsPeriod.lastQuarter => (
+      StatsPeriod.lastQuarter => (
         DateTime(now.year, now.month - 3, now.day),
         now,
       ),
-      _StatsPeriod.lastSemester => (
+      StatsPeriod.lastSemester => (
         DateTime(now.year, now.month - 6, now.day),
         now,
       ),
-      _StatsPeriod.year => (DateTime(now.year), now),
+      StatsPeriod.year => (DateTime(now.year), now),
     };
   }
 
   int get _totalSecondsForAlbum {
     return _tracks.fold(0, (sum, t) => sum + (_trackSeconds[t.id] ?? 0));
-  }
-
-  String _formatSeconds(int seconds) {
-    if (seconds < 60) return '${seconds}s';
-    final m = seconds ~/ 60;
-    if (m < 60) return '${m}min';
-    final h = m ~/ 60;
-    final rem = m % 60;
-    return rem > 0 ? '${h}h ${rem}min' : '${h}h';
   }
 
   String _formatDuration(int totalMs) {
@@ -119,61 +111,20 @@ class _AlbumDetailScreenState extends State<AlbumDetailScreen> {
     _showSnack('Música ocultada.');
   }
 
-  // ── Filtro de período ─────────────────────────────────────────────────────
+  void _onPeriodSelected(StatsPeriod period) {
+    setState(() {
+      _selectedPeriod = period;
+      _selectedYear = null;
+    });
+    _loadStats();
+  }
 
-  Widget _buildStatsFilter(ColorScheme colorScheme) {
-    final periods = [
-      (_StatsPeriod.lastMonth, 'Último mês'),
-      (_StatsPeriod.lastQuarter, 'Trimestre'),
-      (_StatsPeriod.lastSemester, 'Semestre'),
-    ];
-
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-      child: Row(
-        children: [
-          ...periods.map((p) {
-            final isSelected = _selectedPeriod == p.$1 && _selectedYear == null;
-            return Padding(
-              padding: const EdgeInsets.only(right: 8),
-              child: FilterChip(
-                label: Text(p.$2),
-                selected: isSelected,
-                onSelected: (_) {
-                  setState(() {
-                    _selectedPeriod = p.$1;
-                    _selectedYear = null;
-                  });
-                  _loadStats();
-                },
-                selectedColor: colorScheme.primaryContainer,
-                checkmarkColor: colorScheme.primary,
-              ),
-            );
-          }),
-          ..._availableYears.map((year) {
-            final isSelected = _selectedYear == year;
-            return Padding(
-              padding: const EdgeInsets.only(right: 8),
-              child: FilterChip(
-                label: Text('$year'),
-                selected: isSelected,
-                onSelected: (_) {
-                  setState(() {
-                    _selectedPeriod = _StatsPeriod.year;
-                    _selectedYear = year;
-                  });
-                  _loadStats();
-                },
-                selectedColor: colorScheme.primaryContainer,
-                checkmarkColor: colorScheme.primary,
-              ),
-            );
-          }),
-        ],
-      ),
-    );
+  void _onYearSelected(int year) {
+    setState(() {
+      _selectedPeriod = StatsPeriod.year;
+      _selectedYear = year;
+    });
+    _loadStats();
   }
 
   // ── Build ─────────────────────────────────────────────────────────────────
@@ -187,7 +138,6 @@ class _AlbumDetailScreenState extends State<AlbumDetailScreen> {
         .firstWhere((t) => t.coverPath != null, orElse: () => _tracks.first)
         .coverPath;
     final artist = widget.tracks.first.artist;
-    final totalAlbumSeconds = _totalSecondsForAlbum;
 
     return Scaffold(
       appBar: AppBar(
@@ -283,58 +233,15 @@ class _AlbumDetailScreenState extends State<AlbumDetailScreen> {
             ),
           ),
 
-          // Seção de estatísticas
-          Container(
-            margin: const EdgeInsets.symmetric(horizontal: 16),
-            decoration: BoxDecoration(
-              color: colorScheme.surfaceContainerHighest.withValues(alpha: 0.4),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-                  child: Row(
-                    children: [
-                      Icon(
-                        Icons.bar_chart_outlined,
-                        size: 16,
-                        color: colorScheme.primary,
-                      ),
-                      const SizedBox(width: 6),
-                      Text(
-                        'Tempo ouvido',
-                        style: TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600,
-                          color: colorScheme.primary,
-                        ),
-                      ),
-                      const Spacer(),
-                      if (_loadingStats)
-                        const SizedBox(
-                          width: 14,
-                          height: 14,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      else
-                        Text(
-                          totalAlbumSeconds > 0
-                              ? _formatSeconds(totalAlbumSeconds)
-                              : '—',
-                          style: TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold,
-                            color: colorScheme.onSurface,
-                          ),
-                        ),
-                    ],
-                  ),
-                ),
-                _buildStatsFilter(colorScheme),
-              ],
-            ),
+          // Estatísticas
+          ListeningStatsSection(
+            loading: _loadingStats,
+            totalSeconds: _totalSecondsForAlbum,
+            selectedPeriod: _selectedPeriod,
+            selectedYear: _selectedYear,
+            availableYears: _availableYears,
+            onPeriodSelected: _onPeriodSelected,
+            onYearSelected: _onYearSelected,
           ),
 
           const SizedBox(height: 8),
@@ -378,7 +285,9 @@ class _AlbumDetailScreenState extends State<AlbumDetailScreen> {
                               Padding(
                                 padding: const EdgeInsets.only(right: 4),
                                 child: Text(
-                                  _formatSeconds(trackSeconds),
+                                  ListeningStatsSection.formatSeconds(
+                                    trackSeconds,
+                                  ),
                                   style: TextStyle(
                                     fontSize: 11,
                                     color: colorScheme.primary,
@@ -469,5 +378,3 @@ class _AlbumDetailScreenState extends State<AlbumDetailScreen> {
     );
   }
 }
-
-enum _StatsPeriod { lastMonth, lastQuarter, lastSemester, year }

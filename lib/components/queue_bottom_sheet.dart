@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
-import 'package:music_wave_player/components/cover_art_widget.dart';
+import 'package:music_wave_player/components/current_queue_tile.dart';
+import 'package:music_wave_player/components/queue_header_bar.dart';
+import 'package:music_wave_player/components/queue_upcoming_list.dart';
+import 'package:music_wave_player/components/timer_active_banner.dart';
 import 'package:music_wave_player/components/timer_bottom_sheet.dart';
 import 'package:music_wave_player/data/playlist_database.dart';
 import 'package:music_wave_player/models/configuration.dart';
@@ -142,9 +145,19 @@ class _QueueBottomSheetState extends State<QueueBottomSheet> {
         ? trackById(fullQueue[currentIndex])
         : null;
 
-    final nextQueue = currentIndex >= 0 && currentIndex + 1 < fullQueue.length
+    final nextQueueIds =
+        currentIndex >= 0 && currentIndex + 1 < fullQueue.length
         ? fullQueue.sublist(currentIndex + 1)
         : <int>[];
+
+    final upcomingTracks = nextQueueIds
+        .map(trackById)
+        .whereType<MusicTrack>()
+        .toList();
+
+    // Traduz um índice relativo a [upcomingTracks] para a posição real na
+    // fila completa (offset pela faixa atual).
+    int realIndexOf(int upcomingIndex) => currentIndex + 1 + upcomingIndex;
 
     return Material(
       color: colorScheme.surface,
@@ -166,260 +179,51 @@ class _QueueBottomSheetState extends State<QueueBottomSheet> {
               ),
             ),
 
-            // Cabeçalho
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 0, 8, 8),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      'Fila de reprodução',
-                      style: TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
-                        color: colorScheme.onSurface,
-                      ),
-                    ),
-                  ),
-                  if (nextQueue.isNotEmpty)
-                    IconButton(
-                      icon: Icon(
-                        Icons.playlist_add,
-                        color: colorScheme.primary,
-                      ),
-                      tooltip: 'Salvar fila como playlist',
-                      onPressed: () => _saveQueueAsPlaylist(context, config),
-                    ),
-                  if (nextQueue.isNotEmpty)
-                    IconButton(
-                      icon: Icon(
-                        Icons.playlist_remove,
-                        color: colorScheme.error,
-                      ),
-                      tooltip: 'Limpar fila',
-                      onPressed: () => _confirmClearQueue(context, config),
-                    ),
-                  TextButton(
-                    onPressed: () => Navigator.pop(context),
-                    child: const Text('Fechar'),
-                  ),
-                ],
-              ),
+            QueueHeaderBar(
+              hasUpcomingTracks: upcomingTracks.isNotEmpty,
+              onSaveAsPlaylist: () => _saveQueueAsPlaylist(context, config),
+              onClearQueue: () => _confirmClearQueue(context, config),
+              onClose: () => Navigator.pop(context),
             ),
 
-            // Banner do temporizador ativo
             if (timer.isActive)
-              GestureDetector(
+              TimerActiveBanner(
+                remainingLabel: timer.remainingLabel,
                 onTap: () => TimerBottomSheet.show(context),
-                child: Container(
-                  margin: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 14,
-                    vertical: 8,
-                  ),
-                  decoration: BoxDecoration(
-                    color: colorScheme.primaryContainer.withValues(alpha: 0.5),
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: Row(
-                    children: [
-                      Icon(
-                        Icons.bedtime_outlined,
-                        size: 16,
-                        color: colorScheme.primary,
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          'Temporizador: ${timer.remainingLabel}',
-                          style: TextStyle(
-                            fontSize: 13,
-                            color: colorScheme.primary,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                      ),
-                      Icon(
-                        Icons.chevron_right,
-                        size: 16,
-                        color: colorScheme.primary,
-                      ),
-                    ],
-                  ),
-                ),
               ),
 
             const Divider(height: 1),
 
-            // Música atual
             if (currentTrack != null)
-              _CurrentTile(
+              CurrentQueueTile(
                 track: currentTrack,
                 isPlaying: isPlaying,
-                colorScheme: colorScheme,
                 onPlayPause: config.togglePlayPause,
               ),
 
-            if (nextQueue.isNotEmpty) const Divider(height: 1),
+            if (upcomingTracks.isNotEmpty) const Divider(height: 1),
 
-            // Próximas músicas
             Expanded(
-              child: nextQueue.isEmpty
-                  ? Center(
-                      child: Text(
-                        currentTrack == null
-                            ? 'Fila vazia.'
-                            : 'Sem próximas músicas.',
-                        style: TextStyle(color: colorScheme.onSurfaceVariant),
-                      ),
-                    )
-                  : ReorderableListView.builder(
-                      scrollController: _scrollController,
-                      padding: EdgeInsets.only(bottom: 16 + bottomInset),
-                      itemCount: nextQueue.length,
-                      onReorder: (oldIndex, newIndex) {
-                        final realOld = currentIndex + 1 + oldIndex;
-                        final realNew = currentIndex + 1 + newIndex;
-                        config.reorderQueue(realOld, realNew);
-                      },
-                      itemBuilder: (context, index) {
-                        final realIndex = currentIndex + 1 + index;
-                        final track = trackById(nextQueue[index]);
-                        if (track == null) {
-                          return const SizedBox.shrink(key: ValueKey(-1));
-                        }
-
-                        return Dismissible(
-                          key: ValueKey('${track.id}_$realIndex'),
-                          direction: DismissDirection.endToStart,
-                          background: Container(
-                            alignment: Alignment.centerRight,
-                            padding: const EdgeInsets.only(right: 20),
-                            color: colorScheme.error,
-                            child: Icon(
-                              Icons.delete_outline,
-                              color: colorScheme.onError,
-                            ),
-                          ),
-                          onDismissed: (_) => config.removeFromQueue(realIndex),
-                          child: ListTile(
-                            key: ValueKey('tile_${track.id}_$realIndex'),
-                            contentPadding: const EdgeInsets.only(
-                              left: 16,
-                              right: 8,
-                            ),
-                            leading: CoverArtWidget(
-                              coverPath: track.coverPath,
-                              size: 44,
-                              borderRadius: BorderRadius.circular(6),
-                            ),
-                            title: Text(
-                              track.title,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                            subtitle: Text(
-                              track.artist,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                            trailing: ReorderableDragStartListener(
-                              index: index,
-                              child: Icon(
-                                Icons.drag_handle,
-                                color: colorScheme.onSurfaceVariant,
-                              ),
-                            ),
-                            onTap: () {
-                              config.jumpToQueueIndex(realIndex);
-                              Navigator.pop(context);
-                            },
-                          ),
-                        );
-                      },
-                    ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _CurrentTile extends StatelessWidget {
-  final MusicTrack track;
-  final bool isPlaying;
-  final ColorScheme colorScheme;
-  final VoidCallback onPlayPause;
-
-  const _CurrentTile({
-    required this.track,
-    required this.isPlaying,
-    required this.colorScheme,
-    required this.onPlayPause,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      margin: const EdgeInsets.fromLTRB(8, 8, 8, 4),
-      decoration: BoxDecoration(
-        color: colorScheme.primaryContainer.withValues(alpha: 0.45),
-        borderRadius: BorderRadius.circular(12),
-        border: Border(left: BorderSide(color: colorScheme.primary, width: 3)),
-      ),
-      child: ListTile(
-        contentPadding: const EdgeInsets.only(left: 12, right: 8),
-        leading: CoverArtWidget(
-          coverPath: track.coverPath,
-          size: 44,
-          borderRadius: BorderRadius.circular(6),
-        ),
-        title: Text(
-          track.title,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: TextStyle(
-            color: colorScheme.primary,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-        subtitle: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              track.artist,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                color: colorScheme.primary.withValues(alpha: 0.8),
-              ),
-            ),
-            Container(
-              margin: const EdgeInsets.only(top: 4),
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-              decoration: BoxDecoration(
-                color: colorScheme.primary,
-                borderRadius: BorderRadius.circular(20),
-              ),
-              child: Text(
-                'Tocando agora',
-                style: TextStyle(
-                  color: colorScheme.onPrimary,
-                  fontSize: 10,
-                  fontWeight: FontWeight.bold,
-                ),
+              child: QueueUpcomingList(
+                upcomingTracks: upcomingTracks,
+                hasCurrentTrack: currentTrack != null,
+                scrollController: _scrollController,
+                bottomPadding: bottomInset,
+                onReorder: (oldIndex, newIndex) {
+                  config.reorderQueue(
+                    realIndexOf(oldIndex),
+                    realIndexOf(newIndex),
+                  );
+                },
+                onDismiss: (index) =>
+                    config.removeFromQueue(realIndexOf(index)),
+                onTap: (index) {
+                  config.jumpToQueueIndex(realIndexOf(index));
+                  Navigator.pop(context);
+                },
               ),
             ),
           ],
-        ),
-        trailing: IconButton(
-          icon: Icon(
-            isPlaying ? Icons.pause_circle : Icons.play_circle,
-            color: colorScheme.primary,
-            size: 32,
-          ),
-          onPressed: onPlayPause,
         ),
       ),
     );

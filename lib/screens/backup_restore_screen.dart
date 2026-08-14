@@ -6,6 +6,8 @@ import 'package:file_picker/file_picker.dart';
 import 'package:file_saver/file_saver.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:music_wave_player/components/backup_export_section.dart';
+import 'package:music_wave_player/components/backup_restore_section.dart';
 import 'package:music_wave_player/main.dart';
 import 'package:music_wave_player/models/configuration.dart';
 import 'package:music_wave_player/services/backup_service.dart';
@@ -203,118 +205,24 @@ class _BackupRestoreScreenState extends State<BackupRestoreScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-
     return Scaffold(
       appBar: AppBar(title: const Text('Backup e Restauração')),
       body: SafeArea(
         child: ListView(
           padding: const EdgeInsets.all(16),
           children: [
-            Text(
-              'EXPORTAR',
-              style: TextStyle(
-                fontSize: 11,
-                fontWeight: FontWeight.bold,
-                letterSpacing: 1.2,
-                color: colorScheme.primary,
-              ),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              'Inclui playlists, notas, músicas ocultas, histórico de reprodução e configurações (equalizador, ordenação, crossfade).',
-              style: TextStyle(
-                fontSize: 12,
-                color: colorScheme.onSurfaceVariant,
-              ),
-            ),
-            const SizedBox(height: 12),
-            Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: _sharing ? null : _shareBackup,
-                    icon: _sharing
-                        ? const SizedBox(
-                            width: 16,
-                            height: 16,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Icon(Icons.share_outlined),
-                    label: const Text('Compartilhar'),
-                    style: OutlinedButton.styleFrom(
-                      minimumSize: const Size.fromHeight(48),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: FilledButton.icon(
-                    onPressed: _savingToFolder ? null : _saveToFolder,
-                    icon: _savingToFolder
-                        ? const SizedBox(
-                            width: 16,
-                            height: 16,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              color: Colors.white,
-                            ),
-                          )
-                        : const Icon(Icons.folder_outlined),
-                    label: const Text('Salvar em pasta'),
-                    style: FilledButton.styleFrom(
-                      minimumSize: const Size.fromHeight(48),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                    ),
-                  ),
-                ),
-              ],
+            BackupExportSection(
+              isSharing: _sharing,
+              isSavingToFolder: _savingToFolder,
+              onShare: _shareBackup,
+              onSaveToFolder: _saveToFolder,
             ),
             const SizedBox(height: 32),
             const Divider(height: 1),
             const SizedBox(height: 24),
-            Text(
-              'RESTAURAR',
-              style: TextStyle(
-                fontSize: 11,
-                fontWeight: FontWeight.bold,
-                letterSpacing: 1.2,
-                color: colorScheme.primary,
-              ),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              'Selecione um arquivo .mwp. A restauração roda em segundo plano — você pode navegar para outra tela enquanto isso.',
-              style: TextStyle(
-                fontSize: 12,
-                color: colorScheme.onSurfaceVariant,
-              ),
-            ),
-            const SizedBox(height: 12),
-            FilledButton.icon(
-              onPressed: _pickingImportFile ? null : _importBackup,
-              icon: _pickingImportFile
-                  ? const SizedBox(
-                      width: 16,
-                      height: 16,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: Colors.white,
-                      ),
-                    )
-                  : const Icon(Icons.file_open_outlined),
-              label: const Text('Selecionar arquivo (.mwp)'),
-              style: FilledButton.styleFrom(
-                minimumSize: const Size.fromHeight(48),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
-              ),
+            BackupRestoreSection(
+              isPicking: _pickingImportFile,
+              onImport: _importBackup,
             ),
           ],
         ),

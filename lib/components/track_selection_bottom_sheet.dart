@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:music_wave_player/components/selectable_track_tile.dart';
+import 'package:music_wave_player/components/track_selection_footer.dart';
 import 'package:music_wave_player/models/music_track.dart';
-import 'package:music_wave_player/components/cover_art_widget.dart';
 
 class TrackSelectionBottomSheet extends StatefulWidget {
   final List<MusicTrack> tracks;
@@ -58,7 +59,6 @@ class _TrackSelectionBottomSheetState extends State<TrackSelectionBottomSheet> {
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
-    final bottomInset = MediaQuery.of(context).padding.bottom;
 
     return Material(
       color: colorScheme.surface,
@@ -108,68 +108,19 @@ class _TrackSelectionBottomSheetState extends State<TrackSelectionBottomSheet> {
                 itemCount: widget.tracks.length,
                 itemBuilder: (context, index) {
                   final track = widget.tracks[index];
-                  final isSelected = _selected.contains(track.id);
-                  return ListTile(
-                    leading: CoverArtWidget(
-                      coverPath: track.coverPath,
-                      size: 44,
-                      borderRadius: BorderRadius.circular(6),
-                    ),
-                    title: Text(
-                      track.title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    subtitle: Text(
-                      track.artist,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    trailing: Checkbox(
-                      value: isSelected,
-                      onChanged: (_) => _toggle(track.id!),
-                      activeColor: colorScheme.primary,
-                    ),
-                    onTap: () => _toggle(track.id!),
+                  return SelectableTrackTile(
+                    track: track,
+                    isSelected: _selected.contains(track.id),
+                    onToggle: () => _toggle(track.id!),
                   );
                 },
               ),
             ),
             const Divider(height: 1),
-            // Botões
-            Padding(
-              padding: EdgeInsets.fromLTRB(20, 12, 20, 16 + bottomInset),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton(
-                      onPressed: () => Navigator.pop(context),
-                      style: OutlinedButton.styleFrom(
-                        minimumSize: const Size.fromHeight(48),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                      ),
-                      child: const Text('Cancelar'),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: FilledButton(
-                      onPressed: _selected.isEmpty
-                          ? null
-                          : () => Navigator.pop(context, _selected.toList()),
-                      style: FilledButton.styleFrom(
-                        minimumSize: const Size.fromHeight(48),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                      ),
-                      child: const Text('Confirmar'),
-                    ),
-                  ),
-                ],
-              ),
+            TrackSelectionFooter(
+              hasSelection: _selected.isNotEmpty,
+              onCancel: () => Navigator.pop(context),
+              onConfirm: () => Navigator.pop(context, _selected.toList()),
             ),
           ],
         ),

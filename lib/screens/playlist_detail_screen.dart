@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:music_wave_player/components/cover_art_widget.dart';
+import 'package:music_wave_player/components/playlist_header_card.dart';
+import 'package:music_wave_player/components/playlist_track_tile.dart';
 import 'package:music_wave_player/components/rating_bottom_sheet.dart';
 import 'package:music_wave_player/components/track_selection_bottom_sheet.dart';
 import 'package:music_wave_player/data/playlist_database.dart';
@@ -196,67 +197,21 @@ class _PlaylistDetailScreenState extends State<PlaylistDetailScreen> {
           ? const Center(child: CircularProgressIndicator())
           : Column(
               children: [
-                // Cabeçalho
-                Padding(
-                  padding: const EdgeInsets.all(20),
-                  child: Row(
-                    children: [
-                      Container(
-                        width: 80,
-                        height: 80,
-                        decoration: BoxDecoration(
-                          color: colorScheme.primaryContainer,
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child:
-                            tracks.isNotEmpty && tracks.first.coverPath != null
-                            ? CoverArtWidget(
-                                coverPath: tracks.first.coverPath,
-                                size: 80,
-                                borderRadius: BorderRadius.circular(12),
-                              )
-                            : Icon(
-                                Icons.library_music,
-                                size: 40,
-                                color: colorScheme.onPrimaryContainer,
-                              ),
-                      ),
-                      const SizedBox(width: 16),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              _playlist.name,
-                              style: const TextStyle(
-                                fontSize: 18,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              '${tracks.length} música${tracks.length == 1 ? '' : 's'} · ${_formatDuration(tracks.fold(0, (sum, t) => sum + t.durationMs))}',
-                              style: TextStyle(
-                                color: colorScheme.onSurfaceVariant,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      if (tracks.isNotEmpty)
-                        FilledButton.icon(
-                          onPressed: () {
-                            config.playPlaylist(_playlist);
-                            Navigator.pop(context);
-                          },
-                          icon: const Icon(Icons.play_arrow),
-                          label: const Text('Tocar'),
-                        ),
-                    ],
+                PlaylistHeaderCard(
+                  name: _playlist.name,
+                  coverPath: tracks.isNotEmpty ? tracks.first.coverPath : null,
+                  trackCount: tracks.length,
+                  durationLabel: _formatDuration(
+                    tracks.fold(0, (sum, t) => sum + t.durationMs),
                   ),
+                  onPlay: tracks.isNotEmpty
+                      ? () {
+                          config.playPlaylist(_playlist);
+                          Navigator.pop(context);
+                        }
+                      : null,
                 ),
                 const Divider(height: 1),
-                // Lista de faixas
                 Expanded(
                   child: tracks.isEmpty
                       ? Center(
@@ -272,69 +227,12 @@ class _PlaylistDetailScreenState extends State<PlaylistDetailScreen> {
                           itemCount: tracks.length,
                           itemBuilder: (context, index) {
                             final track = tracks[index];
-                            return ListTile(
-                              leading: CoverArtWidget(
-                                coverPath: track.coverPath,
-                                size: 44,
-                                borderRadius: BorderRadius.circular(6),
-                              ),
-                              title: Text(
-                                track.title,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                              subtitle: Text(
-                                track.artist,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                              trailing: PopupMenuButton<String>(
-                                icon: const Icon(Icons.more_vert),
-                                onSelected: (value) async {
-                                  if (value == 'remove') {
-                                    await _removeTrack(track.id!);
-                                  } else if (value == 'rate') {
-                                    await RatingBottomSheet.show(
-                                      context,
-                                      track: track,
-                                    );
-                                  } else if (value == 'hide') {
-                                    await _hideTrack(track);
-                                  }
-                                },
-                                itemBuilder: (_) => const [
-                                  PopupMenuItem(
-                                    value: 'remove',
-                                    child: Row(
-                                      children: [
-                                        Icon(Icons.remove_circle_outline),
-                                        SizedBox(width: 12),
-                                        Text('Remover da playlist'),
-                                      ],
-                                    ),
-                                  ),
-                                  PopupMenuItem(
-                                    value: 'rate',
-                                    child: Row(
-                                      children: [
-                                        Icon(Icons.star_outline),
-                                        SizedBox(width: 12),
-                                        Text('Avaliar'),
-                                      ],
-                                    ),
-                                  ),
-                                  PopupMenuItem(
-                                    value: 'hide',
-                                    child: Row(
-                                      children: [
-                                        Icon(Icons.visibility_off_outlined),
-                                        SizedBox(width: 12),
-                                        Text('Ocultar'),
-                                      ],
-                                    ),
-                                  ),
-                                ],
-                              ),
+                            return PlaylistTrackTile(
+                              track: track,
+                              onRemove: () => _removeTrack(track.id!),
+                              onRate: () =>
+                                  RatingBottomSheet.show(context, track: track),
+                              onHide: () => _hideTrack(track),
                               onTap: () {
                                 config.playTrack(track.id!);
                                 Navigator.push(

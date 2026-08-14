@@ -1,6 +1,5 @@
-import 'dart:io';
-
 import 'package:flutter/material.dart';
+import 'package:music_wave_player/components/grouped_entity_tile.dart';
 import 'package:music_wave_player/models/music_track.dart';
 import 'package:music_wave_player/screens/album_detail_screen.dart';
 
@@ -22,7 +21,6 @@ class AlbumsTab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
     final grouped = _groupByAlbum();
     final albums = grouped.keys.toList();
 
@@ -40,44 +38,14 @@ class AlbumsTab extends StatelessWidget {
             )
             .coverPath;
 
-        return ListTile(
-          leading: ClipRRect(
-            borderRadius: BorderRadius.circular(6),
-            child: SizedBox(
-              width: 44,
-              height: 44,
-              child: coverPath != null
-                  ? Image.file(
-                      File(coverPath),
-                      fit: BoxFit.cover,
-                      errorBuilder: (_, __, ___) =>
-                          _AlbumPlaceholder(colorScheme: colorScheme),
-                    )
-                  : _AlbumPlaceholder(colorScheme: colorScheme),
-            ),
+        return GroupedEntityTile(
+          leading: EntityCoverThumbnail(
+            coverPath: coverPath,
+            fallbackIcon: Icons.album,
           ),
-          title: Text(
-            album,
-            style: TextStyle(
-              color: colorScheme.onSurface,
-              fontWeight: FontWeight.w600,
-            ),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-          ),
-          subtitle: Text(
-            '${albumTracks.first.artist} · ${albumTracks.length} música${albumTracks.length == 1 ? '' : 's'}',
-            style: TextStyle(
-              color: colorScheme.onSurfaceVariant,
-              fontSize: 12.0,
-            ),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-          ),
-          trailing: Icon(
-            Icons.chevron_right,
-            color: colorScheme.onSurfaceVariant,
-          ),
+          title: album,
+          subtitle:
+              '${albumTracks.first.artist} · ${albumTracks.length} música${albumTracks.length == 1 ? '' : 's'}',
           onTap: () => Navigator.push(
             context,
             MaterialPageRoute(
@@ -87,19 +55,6 @@ class AlbumsTab extends StatelessWidget {
           ),
         );
       },
-    );
-  }
-}
-
-class _AlbumPlaceholder extends StatelessWidget {
-  final ColorScheme colorScheme;
-  const _AlbumPlaceholder({required this.colorScheme});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      color: colorScheme.primaryContainer,
-      child: Icon(Icons.album, color: colorScheme.onPrimaryContainer),
     );
   }
 }

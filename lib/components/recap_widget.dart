@@ -2,6 +2,9 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
+import 'package:music_wave_player/components/recap_card_header.dart';
+import 'package:music_wave_player/components/recap_controls.dart';
+import 'package:music_wave_player/components/recap_list_tile.dart';
 import 'package:music_wave_player/services/recap_service.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:path_provider/path_provider.dart';
@@ -50,9 +53,12 @@ class _RecapWidgetState extends State<RecapWidget> {
       final file = File('${dir.path}/recap_${result.period.label}.png');
       await file.writeAsBytes(bytes);
 
-      await Share.shareXFiles([
-        XFile(file.path),
-      ], text: 'Meu recap ${result.period.label} no LocalPlay 🎵');
+      await SharePlus.instance.share(
+        ShareParams(
+          files: [XFile(file.path)],
+          text: 'Meu recap ${result.period.label} no LocalPlay 🎵',
+        ),
+      );
     } finally {
       if (mounted) setState(() => _sharing = false);
     }
@@ -78,8 +84,6 @@ class _RecapWidgetState extends State<RecapWidget> {
 
   @override
   Widget build(BuildContext context) {
-    final bottomInset = MediaQuery.of(context).padding.bottom;
-
     return Container(
       height: MediaQuery.of(context).size.height * 0.92,
       decoration: const BoxDecoration(
@@ -101,7 +105,11 @@ class _RecapWidgetState extends State<RecapWidget> {
           Expanded(
             child: RepaintBoundary(key: _shareKey, child: _buildCard()),
           ),
-          _buildControls(bottomInset),
+          RecapControls(
+            isSharing: _sharing,
+            onClose: () => Navigator.pop(context),
+            onShare: _share,
+          ),
         ],
       ),
     );
@@ -118,48 +126,11 @@ class _RecapWidgetState extends State<RecapWidget> {
       ),
       child: Column(
         children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(24, 32, 24, 16),
-            child: Column(
-              children: [
-                Text(
-                  '$_periodIcon Recap',
-                  style: const TextStyle(
-                    color: Colors.white70,
-                    fontSize: 14,
-                    letterSpacing: 2,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  result.period.label,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 28,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                const SizedBox(height: 16),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: List.generate(2, (i) {
-                    return AnimatedContainer(
-                      duration: const Duration(milliseconds: 200),
-                      margin: const EdgeInsets.symmetric(horizontal: 4),
-                      width: _currentPage == i ? 20 : 8,
-                      height: 8,
-                      decoration: BoxDecoration(
-                        color: _currentPage == i
-                            ? const Color(0xFFA8DADC)
-                            : Colors.white30,
-                        borderRadius: BorderRadius.circular(4),
-                      ),
-                    );
-                  }),
-                ),
-              ],
-            ),
+          RecapCardHeader(
+            periodIcon: _periodIcon,
+            periodLabel: result.period.label,
+            currentPage: _currentPage,
+            pageCount: _pages.length,
           ),
           Expanded(
             child: PageView(
@@ -213,7 +184,7 @@ class _RecapWidgetState extends State<RecapWidget> {
               itemCount: tracks.length,
               itemBuilder: (context, i) {
                 final item = tracks[i];
-                return _RecapListTile(
+                return RecapListTile(
                   position: i + 1,
                   title: item.track.title,
                   subtitle: item.track.artist.split(';').first.trim(),
@@ -251,132 +222,13 @@ class _RecapWidgetState extends State<RecapWidget> {
               itemCount: artists.length,
               itemBuilder: (context, i) {
                 final item = artists[i];
-                return _RecapListTile(
+                return RecapListTile(
                   position: i + 1,
                   title: item.artist,
                   time: _formatSeconds(item.seconds),
                   isTop3: i < 3,
                 );
               },
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildControls(double bottomInset) {
-    return Container(
-      color: const Color(0xFF0D1B2A),
-      padding: EdgeInsets.fromLTRB(24, 12, 24, 16 + bottomInset),
-      child: Row(
-        children: [
-          Expanded(
-            child: OutlinedButton(
-              onPressed: () => Navigator.pop(context),
-              style: OutlinedButton.styleFrom(
-                foregroundColor: Colors.white70,
-                side: const BorderSide(color: Colors.white24),
-                minimumSize: const Size.fromHeight(48),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
-              ),
-              child: const Text('Fechar'),
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: FilledButton.icon(
-              onPressed: _sharing ? null : _share,
-              style: FilledButton.styleFrom(
-                backgroundColor: const Color(0xFFA8DADC),
-                foregroundColor: const Color(0xFF0D1B2A),
-                minimumSize: const Size.fromHeight(48),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
-              ),
-              icon: _sharing
-                  ? const SizedBox(
-                      width: 16,
-                      height: 16,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Icon(Icons.share_outlined),
-              label: const Text('Compartilhar'),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _RecapListTile extends StatelessWidget {
-  final int position;
-  final String title;
-  final String? subtitle;
-  final String time;
-  final bool isTop3;
-
-  const _RecapListTile({
-    required this.position,
-    required this.title,
-    this.subtitle,
-    required this.time,
-    required this.isTop3,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 6),
-      child: Row(
-        children: [
-          SizedBox(
-            width: 28,
-            child: Text(
-              '$position',
-              style: TextStyle(
-                color: isTop3 ? const Color(0xFFA8DADC) : Colors.white38,
-                fontWeight: isTop3 ? FontWeight.bold : FontWeight.normal,
-                fontSize: isTop3 ? 16 : 13,
-              ),
-            ),
-          ),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontWeight: isTop3 ? FontWeight.w600 : FontWeight.normal,
-                    fontSize: isTop3 ? 15 : 13,
-                  ),
-                ),
-                if (subtitle != null)
-                  Text(
-                    subtitle!,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(color: Colors.white54, fontSize: 12),
-                  ),
-              ],
-            ),
-          ),
-          const SizedBox(width: 8),
-          Text(
-            time,
-            style: const TextStyle(
-              color: Color(0xFFA8DADC),
-              fontWeight: FontWeight.w600,
-              fontSize: 13,
             ),
           ),
         ],

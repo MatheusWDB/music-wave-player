@@ -2,11 +2,15 @@ import 'package:flutter/material.dart';
 import 'package:music_wave_player/components/cover_art_widget.dart';
 import 'package:music_wave_player/components/edit_track_bottom_sheet.dart';
 import 'package:music_wave_player/components/favorite_button.dart';
+import 'package:music_wave_player/components/full_player_landscape_layout.dart';
+import 'package:music_wave_player/components/full_player_portrait_layout.dart';
+import 'package:music_wave_player/components/full_player_star_rating.dart';
+import 'package:music_wave_player/components/playback_controls_row.dart';
 import 'package:music_wave_player/components/queue_bottom_sheet.dart';
 import 'package:music_wave_player/components/rating_bottom_sheet.dart';
-import 'package:music_wave_player/components/star_rating_widget.dart';
-import 'package:music_wave_player/components/speed_bottom_sheet.dart';
+import 'package:music_wave_player/components/smooth_progress_slider.dart';
 import 'package:music_wave_player/components/timer_bottom_sheet.dart';
+import 'package:music_wave_player/components/track_info_header.dart';
 import 'package:music_wave_player/models/configuration.dart';
 import 'package:music_wave_player/models/music_track.dart';
 import 'package:music_wave_player/services/timer_service.dart';
@@ -64,16 +68,15 @@ class _FullPlayerScreenState extends State<FullPlayerScreen>
       borderRadius: BorderRadius.circular(20),
     );
 
-    final trackInfo = _TrackInfo(
+    final trackInfo = TrackInfoHeader(
       title: currentTrack.title,
       artist: currentTrack.artist,
       album: currentTrack.album,
-      colorScheme: colorScheme,
     );
 
-    final starRating = _StarRatingRow(track: currentTrack, config: config);
+    final starRating = FullPlayerStarRating(track: currentTrack);
 
-    final slider = _SmoothProgressSlider(
+    final slider = SmoothProgressSlider(
       draggingValue: _draggingValue,
       onDragStart: (v) => setState(() => _draggingValue = v),
       onDragUpdate: (v) => setState(() => _draggingValue = v),
@@ -87,13 +90,16 @@ class _FullPlayerScreenState extends State<FullPlayerScreen>
       (c) => c.playbackSpeed,
     );
 
-    final controls = _Controls(
+    final controls = PlaybackControlsRow(
       isPlaying: isPlaying,
       isShuffleActive: isShuffleActive,
       repeatMode: repeatMode,
       playbackSpeed: playbackSpeed,
-      config: config,
-      colorScheme: colorScheme,
+      onShuffleToggle: config.toggleShuffle,
+      onPrevious: config.playPreviousTrack,
+      onPlayPause: config.togglePlayPause,
+      onNext: config.playNextTrack,
+      onRepeatToggle: config.toggleRepeatMode,
     );
 
     return Scaffold(
@@ -154,432 +160,21 @@ class _FullPlayerScreenState extends State<FullPlayerScreen>
       ),
       body: SafeArea(
         child: isLandscape
-            ? _LandscapeLayout(
+            ? FullPlayerLandscapeLayout(
                 coverWidget: coverWidget,
                 trackInfo: trackInfo,
                 starRating: starRating,
                 slider: slider,
                 controls: controls,
-                colorScheme: colorScheme,
               )
-            : _PortraitLayout(
+            : FullPlayerPortraitLayout(
                 coverWidget: coverWidget,
                 trackInfo: trackInfo,
                 starRating: starRating,
                 slider: slider,
                 controls: controls,
-                colorScheme: colorScheme,
               ),
       ),
-    );
-  }
-}
-
-// ── Star rating row ───────────────────────────────────────────────────────────
-
-class _StarRatingRow extends StatelessWidget {
-  final MusicTrack track;
-  final Configuration config;
-
-  const _StarRatingRow({required this.track, required this.config});
-
-  @override
-  Widget build(BuildContext context) {
-    final rating = context.select<Configuration, double>(
-      (c) => c.currentTrack?.rating ?? 0,
-    );
-
-    return StarRatingWidget(
-      rating: rating,
-      starSize: 30,
-      onRatingChanged: (v) => config.setRating(track.id!, v),
-    );
-  }
-}
-
-// ── Layouts ───────────────────────────────────────────────────────────────────
-
-class _PortraitLayout extends StatelessWidget {
-  final Widget coverWidget, trackInfo, starRating, slider, controls;
-  final ColorScheme colorScheme;
-  const _PortraitLayout({
-    required this.coverWidget,
-    required this.trackInfo,
-    required this.starRating,
-    required this.slider,
-    required this.controls,
-    required this.colorScheme,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 12.0),
-      child: Column(
-        children: [
-          Expanded(
-            child: Container(
-              constraints: const BoxConstraints(maxHeight: 320),
-              width: double.infinity,
-              margin: const EdgeInsets.only(bottom: 24.0),
-              child: coverWidget,
-            ),
-          ),
-          trackInfo,
-          const SizedBox(height: 12),
-          starRating,
-          const SizedBox(height: 20),
-          slider,
-          const SizedBox(height: 16),
-          controls,
-          const SizedBox(height: 8),
-        ],
-      ),
-    );
-  }
-}
-
-class _LandscapeLayout extends StatelessWidget {
-  final Widget coverWidget, trackInfo, starRating, slider, controls;
-  final ColorScheme colorScheme;
-  const _LandscapeLayout({
-    required this.coverWidget,
-    required this.trackInfo,
-    required this.starRating,
-    required this.slider,
-    required this.controls,
-    required this.colorScheme,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Expanded(
-          flex: 2,
-          child: Padding(
-            padding: const EdgeInsets.all(16.0),
-            child: coverWidget,
-          ),
-        ),
-        Expanded(
-          flex: 3,
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.fromLTRB(8, 16, 24, 16),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                trackInfo,
-                const SizedBox(height: 8),
-                starRating,
-                const SizedBox(height: 16),
-                slider,
-                const SizedBox(height: 8),
-                controls,
-              ],
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-// ── Slider suave ──────────────────────────────────────────────────────────────
-
-class _SmoothProgressSlider extends StatefulWidget {
-  final double? draggingValue;
-  final ValueChanged<double> onDragStart;
-  final ValueChanged<double> onDragUpdate;
-  final ValueChanged<double> onDragEnd;
-
-  const _SmoothProgressSlider({
-    required this.draggingValue,
-    required this.onDragStart,
-    required this.onDragUpdate,
-    required this.onDragEnd,
-  });
-
-  @override
-  State<_SmoothProgressSlider> createState() => _SmoothProgressSliderState();
-}
-
-class _SmoothProgressSliderState extends State<_SmoothProgressSlider>
-    with SingleTickerProviderStateMixin {
-  late AnimationController _ticker;
-  double _smoothPosition = 0.0;
-
-  @override
-  void initState() {
-    super.initState();
-    _ticker = AnimationController(
-      vsync: this,
-      duration: const Duration(days: 1),
-    );
-    _ticker.addListener(_onTick);
-  }
-
-  @override
-  void dispose() {
-    _ticker.dispose();
-    super.dispose();
-  }
-
-  DateTime? _lastTickTime;
-
-  void _onTick() {
-    if (!mounted) return;
-    final config = context.read<Configuration>();
-    if (widget.draggingValue != null || !config.isPlaying) return;
-    final now = DateTime.now();
-    final elapsed = _lastTickTime != null
-        ? now.difference(_lastTickTime!).inMilliseconds
-        : 16;
-    _lastTickTime = now;
-    final realPosition = config.currentPositionMs.toDouble();
-    final diff = (realPosition - _smoothPosition).abs();
-    if (diff > 1500) {
-      _smoothPosition = realPosition;
-    } else {
-      _smoothPosition += elapsed;
-      _smoothPosition += (realPosition - _smoothPosition) * 0.05;
-    }
-    setState(() {});
-  }
-
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    _smoothPosition = context
-        .read<Configuration>()
-        .currentPositionMs
-        .toDouble();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final isPlaying = context.select<Configuration, bool>((c) => c.isPlaying);
-    final positionMs = context.select<Configuration, int>(
-      (c) => c.currentPositionMs,
-    );
-    final durationMs = context.select<Configuration, int>(
-      (c) => c.trackDurationMs,
-    );
-    final colorScheme = Theme.of(context).colorScheme;
-
-    if (isPlaying && !_ticker.isAnimating) {
-      _lastTickTime = DateTime.now();
-      _ticker.forward();
-    } else if (!isPlaying && _ticker.isAnimating) {
-      _ticker.stop();
-      _smoothPosition = positionMs.toDouble();
-    }
-
-    final double max = durationMs > 0 ? durationMs.toDouble() : 1.0;
-    final double displayValue =
-        widget.draggingValue ?? _smoothPosition.clamp(0.0, max);
-
-    return Column(
-      children: [
-        SliderTheme(
-          data: SliderTheme.of(context).copyWith(
-            activeTrackColor: colorScheme.primary,
-            inactiveTrackColor: colorScheme.primary.withValues(alpha: 0.25),
-            thumbColor: colorScheme.primary,
-            overlayColor: colorScheme.primary.withValues(alpha: 0.15),
-            thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 7),
-            trackHeight: 3.5,
-          ),
-          child: Slider(
-            min: 0.0,
-            max: max,
-            value: displayValue.clamp(0.0, max),
-            onChanged: (v) {
-              if (widget.draggingValue == null) {
-                widget.onDragStart(v);
-              } else {
-                widget.onDragUpdate(v);
-              }
-            },
-            onChangeEnd: widget.onDragEnd,
-          ),
-        ),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 8.0),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(
-                _fmt((widget.draggingValue ?? _smoothPosition).toInt()),
-                style: TextStyle(
-                  color: colorScheme.onSurfaceVariant,
-                  fontSize: 12,
-                ),
-              ),
-              Text(
-                _fmt(durationMs),
-                style: TextStyle(
-                  color: colorScheme.onSurfaceVariant,
-                  fontSize: 12,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-
-  String _fmt(int ms) {
-    final d = Duration(milliseconds: ms < 0 ? 0 : ms);
-    String two(int n) => n.toString().padLeft(2, '0');
-    return '${two(d.inMinutes.remainder(60))}:${two(d.inSeconds.remainder(60))}';
-  }
-}
-
-// ── Widgets auxiliares ────────────────────────────────────────────────────────
-
-class _TrackInfo extends StatelessWidget {
-  final String title, artist, album;
-  final ColorScheme colorScheme;
-  const _TrackInfo({
-    required this.title,
-    required this.artist,
-    required this.album,
-    required this.colorScheme,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      children: [
-        Text(
-          title,
-          style: TextStyle(
-            fontSize: 20,
-            fontWeight: FontWeight.bold,
-            color: colorScheme.onSurface,
-          ),
-          textAlign: TextAlign.center,
-          maxLines: 2,
-          overflow: TextOverflow.ellipsis,
-        ),
-        const SizedBox(height: 4),
-        Text(
-          artist,
-          style: TextStyle(fontSize: 15, color: colorScheme.onSurfaceVariant),
-          textAlign: TextAlign.center,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-        ),
-        const SizedBox(height: 2),
-        Text(
-          album,
-          style: TextStyle(
-            fontSize: 12,
-            color: colorScheme.onSurfaceVariant.withValues(alpha: 0.65),
-          ),
-          textAlign: TextAlign.center,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-        ),
-      ],
-    );
-  }
-}
-
-class _Controls extends StatelessWidget {
-  final bool isPlaying, isShuffleActive;
-  final String repeatMode;
-  final double playbackSpeed;
-  final Configuration config;
-  final ColorScheme colorScheme;
-  const _Controls({
-    required this.isPlaying,
-    required this.isShuffleActive,
-    required this.repeatMode,
-    required this.playbackSpeed,
-    required this.config,
-    required this.colorScheme,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceAround,
-          children: [
-            IconButton(
-              icon: Icon(
-                Icons.shuffle,
-                color: isShuffleActive
-                    ? colorScheme.primary
-                    : colorScheme.onSurfaceVariant,
-              ),
-              iconSize: 26,
-              onPressed: config.toggleShuffle,
-            ),
-            IconButton(
-              icon: Icon(Icons.skip_previous, color: colorScheme.primary),
-              iconSize: 44,
-              onPressed: config.playPreviousTrack,
-            ),
-            Container(
-              decoration: BoxDecoration(
-                color: colorScheme.primary,
-                shape: BoxShape.circle,
-              ),
-              child: IconButton(
-                icon: Icon(
-                  isPlaying ? Icons.pause : Icons.play_arrow,
-                  color: colorScheme.onPrimary,
-                ),
-                iconSize: 38,
-                padding: const EdgeInsets.all(10),
-                onPressed: config.togglePlayPause,
-              ),
-            ),
-            IconButton(
-              icon: Icon(Icons.skip_next, color: colorScheme.primary),
-              iconSize: 44,
-              onPressed: config.playNextTrack,
-            ),
-            IconButton(
-              icon: Icon(
-                repeatMode == 'One' ? Icons.repeat_one : Icons.repeat,
-                color: repeatMode == 'Off'
-                    ? colorScheme.onSurfaceVariant
-                    : colorScheme.primary,
-              ),
-              iconSize: 26,
-              onPressed: config.toggleRepeatMode,
-            ),
-          ],
-        ),
-        Builder(
-          builder: (ctx) => TextButton.icon(
-            onPressed: () => SpeedBottomSheet.show(ctx),
-            icon: Icon(
-              Icons.speed,
-              size: 16,
-              color: playbackSpeed != 1.0
-                  ? colorScheme.primary
-                  : colorScheme.onSurfaceVariant,
-            ),
-            label: Text(
-              playbackSpeed == 1.0 ? 'Normal' : '${playbackSpeed}x',
-              style: TextStyle(
-                fontSize: 13,
-                color: playbackSpeed != 1.0
-                    ? colorScheme.primary
-                    : colorScheme.onSurfaceVariant,
-              ),
-            ),
-          ),
-        ),
-      ],
     );
   }
 }

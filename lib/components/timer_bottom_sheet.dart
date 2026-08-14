@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:music_wave_player/components/timer_custom_duration_picker.dart';
+import 'package:music_wave_player/components/timer_preset_options.dart';
 import 'package:music_wave_player/services/timer_service.dart';
 import 'package:provider/provider.dart';
 
@@ -20,15 +22,6 @@ class TimerBottomSheet extends StatefulWidget {
 
 class _TimerBottomSheetState extends State<TimerBottomSheet> {
   bool _showCustomPicker = false;
-  int _customHours = 0;
-  int _customMinutes = 30;
-
-  static const _presets = [
-    (label: '15 minutos', seconds: 15 * 60),
-    (label: '30 minutos', seconds: 30 * 60),
-    (label: '45 minutos', seconds: 45 * 60),
-    (label: '1 hora', seconds: 60 * 60),
-  ];
 
   void _startDuration(int seconds) {
     context.read<SleepTimerService>().startDuration(seconds);
@@ -48,12 +41,6 @@ class _TimerBottomSheetState extends State<TimerBottomSheet> {
   void _cancel() {
     context.read<SleepTimerService>().cancel();
     Navigator.pop(context);
-  }
-
-  void _confirmCustom() {
-    final seconds = (_customHours * 3600) + (_customMinutes * 60);
-    if (seconds <= 0) return;
-    _startDuration(seconds);
   }
 
   @override
@@ -101,222 +88,27 @@ class _TimerBottomSheetState extends State<TimerBottomSheet> {
             // Status ativo
             if (timer.isActive) ...[
               const SizedBox(height: 12),
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 16,
-                  vertical: 10,
-                ),
-                decoration: BoxDecoration(
-                  color: colorScheme.primaryContainer.withValues(alpha: 0.5),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Row(
-                  children: [
-                    Icon(
-                      Icons.timer_outlined,
-                      color: colorScheme.primary,
-                      size: 18,
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        'Ativo: ${timer.remainingLabel}',
-                        style: TextStyle(
-                          color: colorScheme.primary,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ),
-                    TextButton(
-                      onPressed: _cancel,
-                      child: Text(
-                        'Cancelar',
-                        style: TextStyle(color: colorScheme.error),
-                      ),
-                    ),
-                  ],
-                ),
+              _ActiveStatusBanner(
+                remainingLabel: timer.remainingLabel,
+                onCancel: _cancel,
+                colorScheme: colorScheme,
               ),
             ],
 
             const SizedBox(height: 16),
 
-            if (!_showCustomPicker) ...[
-              // Opções predefinidas
-              ..._presets.map(
-                (p) => _OptionTile(
-                  label: p.label,
-                  onTap: () => _startDuration(p.seconds),
-                  colorScheme: colorScheme,
-                ),
+            if (!_showCustomPicker)
+              TimerPresetOptions(
+                onDurationSelected: _startDuration,
+                onEndOfTrack: _startEndOfTrack,
+                onEndOfQueue: _startEndOfQueue,
+                onCustomTapped: () => setState(() => _showCustomPicker = true),
+              )
+            else
+              TimerCustomDurationPicker(
+                onBack: () => setState(() => _showCustomPicker = false),
+                onConfirm: _startDuration,
               ),
-              _OptionTile(
-                label: 'Fim da música atual',
-                icon: Icons.music_note_outlined,
-                onTap: _startEndOfTrack,
-                colorScheme: colorScheme,
-              ),
-              _OptionTile(
-                label: 'Fim da fila',
-                icon: Icons.queue_music_outlined,
-                onTap: _startEndOfQueue,
-                colorScheme: colorScheme,
-              ),
-              _OptionTile(
-                label: 'Personalizado...',
-                icon: Icons.tune,
-                onTap: () => setState(() => _showCustomPicker = true),
-                colorScheme: colorScheme,
-              ),
-            ] else ...[
-              // Picker personalizado
-              Text(
-                'Definir duração',
-                style: TextStyle(
-                  fontSize: 14,
-                  color: colorScheme.onSurfaceVariant,
-                ),
-              ),
-              const SizedBox(height: 16),
-              SizedBox(
-                height: 150,
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    // Horas
-                    Expanded(
-                      child: Column(
-                        children: [
-                          Text(
-                            'Horas',
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: colorScheme.onSurfaceVariant,
-                            ),
-                          ),
-                          Expanded(
-                            child: ListWheelScrollView.useDelegate(
-                              itemExtent: 40,
-                              perspective: 0.003,
-                              diameterRatio: 1.5,
-                              physics: const FixedExtentScrollPhysics(),
-                              controller: FixedExtentScrollController(
-                                initialItem: _customHours,
-                              ),
-                              onSelectedItemChanged: (i) =>
-                                  setState(() => _customHours = i),
-                              childDelegate: ListWheelChildBuilderDelegate(
-                                childCount: 24,
-                                builder: (_, i) => Center(
-                                  child: Text(
-                                    i.toString().padLeft(2, '0'),
-                                    style: TextStyle(
-                                      fontSize: 22,
-                                      fontWeight: _customHours == i
-                                          ? FontWeight.bold
-                                          : FontWeight.normal,
-                                      color: _customHours == i
-                                          ? colorScheme.primary
-                                          : colorScheme.onSurfaceVariant,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    Text(
-                      ':',
-                      style: TextStyle(
-                        fontSize: 28,
-                        fontWeight: FontWeight.bold,
-                        color: colorScheme.onSurface,
-                      ),
-                    ),
-                    // Minutos
-                    Expanded(
-                      child: Column(
-                        children: [
-                          Text(
-                            'Minutos',
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: colorScheme.onSurfaceVariant,
-                            ),
-                          ),
-                          Expanded(
-                            child: ListWheelScrollView.useDelegate(
-                              itemExtent: 40,
-                              perspective: 0.003,
-                              diameterRatio: 1.5,
-                              physics: const FixedExtentScrollPhysics(),
-                              controller: FixedExtentScrollController(
-                                initialItem: _customMinutes,
-                              ),
-                              onSelectedItemChanged: (i) =>
-                                  setState(() => _customMinutes = i),
-                              childDelegate: ListWheelChildBuilderDelegate(
-                                childCount: 60,
-                                builder: (_, i) => Center(
-                                  child: Text(
-                                    i.toString().padLeft(2, '0'),
-                                    style: TextStyle(
-                                      fontSize: 22,
-                                      fontWeight: _customMinutes == i
-                                          ? FontWeight.bold
-                                          : FontWeight.normal,
-                                      color: _customMinutes == i
-                                          ? colorScheme.primary
-                                          : colorScheme.onSurfaceVariant,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 16),
-              Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton(
-                      onPressed: () =>
-                          setState(() => _showCustomPicker = false),
-                      style: OutlinedButton.styleFrom(
-                        minimumSize: const Size.fromHeight(48),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                      ),
-                      child: const Text('Voltar'),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: FilledButton(
-                      onPressed: (_customHours == 0 && _customMinutes == 0)
-                          ? null
-                          : _confirmCustom,
-                      style: FilledButton.styleFrom(
-                        minimumSize: const Size.fromHeight(48),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                      ),
-                      child: const Text('Iniciar'),
-                    ),
-                  ),
-                ],
-              ),
-            ],
           ],
         ),
       ),
@@ -324,26 +116,45 @@ class _TimerBottomSheetState extends State<TimerBottomSheet> {
   }
 }
 
-class _OptionTile extends StatelessWidget {
-  final String label;
-  final IconData? icon;
-  final VoidCallback onTap;
+class _ActiveStatusBanner extends StatelessWidget {
+  final String remainingLabel;
+  final VoidCallback onCancel;
   final ColorScheme colorScheme;
 
-  const _OptionTile({
-    required this.label,
-    this.icon,
-    required this.onTap,
+  const _ActiveStatusBanner({
+    required this.remainingLabel,
+    required this.onCancel,
     required this.colorScheme,
   });
 
   @override
   Widget build(BuildContext context) {
-    return ListTile(
-      contentPadding: EdgeInsets.zero,
-      leading: Icon(icon ?? Icons.timer_outlined, color: colorScheme.primary),
-      title: Text(label),
-      onTap: onTap,
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      decoration: BoxDecoration(
+        color: colorScheme.primaryContainer.withValues(alpha: 0.5),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.timer_outlined, color: colorScheme.primary, size: 18),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              'Ativo: $remainingLabel',
+              style: TextStyle(
+                color: colorScheme.primary,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+          TextButton(
+            onPressed: onCancel,
+            child: Text('Cancelar', style: TextStyle(color: colorScheme.error)),
+          ),
+        ],
+      ),
     );
   }
 }

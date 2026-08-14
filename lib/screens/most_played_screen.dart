@@ -1,4 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:music_wave_player/components/listening_stats_section.dart';
+import 'package:music_wave_player/components/period_filter_bar.dart';
+import 'package:music_wave_player/components/ranked_track_tile.dart';
 import 'package:music_wave_player/data/play_session_database.dart';
 import 'package:music_wave_player/models/configuration.dart';
 import 'package:music_wave_player/models/music_track.dart';
@@ -15,7 +18,7 @@ class MostPlayedScreen extends StatefulWidget {
 }
 
 class _MostPlayedScreenState extends State<MostPlayedScreen> {
-  _Period _selectedPeriod = _Period.lastMonth;
+  StatsPeriod _selectedPeriod = StatsPeriod.lastMonth;
   int? _selectedYear;
   List<int> _availableYears = [];
   Map<int, int> _trackSeconds = {};
@@ -47,18 +50,43 @@ class _MostPlayedScreenState extends State<MostPlayedScreen> {
 
   (DateTime, DateTime) _dateRange() {
     final now = DateTime.now();
-    if (_selectedPeriod == _Period.year && _selectedYear != null) {
+    if (_selectedPeriod == StatsPeriod.year && _selectedYear != null) {
       return (
         DateTime(_selectedYear!),
         DateTime(_selectedYear! + 1).subtract(const Duration(milliseconds: 1)),
       );
     }
     return switch (_selectedPeriod) {
-      _Period.lastMonth => (DateTime(now.year, now.month - 1, now.day), now),
-      _Period.lastQuarter => (DateTime(now.year, now.month - 3, now.day), now),
-      _Period.lastSemester => (DateTime(now.year, now.month - 6, now.day), now),
-      _Period.year => (DateTime(now.year), now),
+      StatsPeriod.lastMonth => (
+        DateTime(now.year, now.month - 1, now.day),
+        now,
+      ),
+      StatsPeriod.lastQuarter => (
+        DateTime(now.year, now.month - 3, now.day),
+        now,
+      ),
+      StatsPeriod.lastSemester => (
+        DateTime(now.year, now.month - 6, now.day),
+        now,
+      ),
+      StatsPeriod.year => (DateTime(now.year), now),
     };
+  }
+
+  void _onPeriodSelected(StatsPeriod period) {
+    setState(() {
+      _selectedPeriod = period;
+      _selectedYear = null;
+    });
+    _loadData();
+  }
+
+  void _onYearSelected(int year) {
+    setState(() {
+      _selectedPeriod = StatsPeriod.year;
+      _selectedYear = year;
+    });
+    _loadData();
   }
 
   List<_TrackStat> _buildStats(List<MusicTrack> tracks) {
@@ -91,77 +119,12 @@ class _MostPlayedScreenState extends State<MostPlayedScreen> {
     }
   }
 
-  String _formatSeconds(int seconds) {
-    if (seconds < 60) return '${seconds}s';
-    final m = seconds ~/ 60;
-    if (m < 60) return '${m}min';
-    final h = m ~/ 60;
-    final rem = m % 60;
-    return rem > 0 ? '${h}h ${rem}min' : '${h}h';
-  }
-
-  String _formatDuration(int ms) {
-    final d = Duration(milliseconds: ms);
-    final m = d.inMinutes.remainder(60);
-    final s = d.inSeconds.remainder(60);
-    if (d.inHours > 0)
-      return '${d.inHours}h ${m.toString().padLeft(2, '0')}min';
-    if (m > 0) return '${m}min ${s.toString().padLeft(2, '0')}s';
-    return '${s}s';
-  }
-
-  Widget _buildFilterBar() {
-    final colorScheme = Theme.of(context).colorScheme;
-    final periods = [
-      (_Period.lastMonth, 'Último mês'),
-      (_Period.lastQuarter, 'Trimestre'),
-      (_Period.lastSemester, 'Semestre'),
-    ];
-
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      child: Row(
-        children: [
-          ...periods.map((p) {
-            final isSelected = _selectedPeriod == p.$1 && _selectedYear == null;
-            return Padding(
-              padding: const EdgeInsets.only(right: 8),
-              child: FilterChip(
-                label: Text(p.$2),
-                selected: isSelected,
-                onSelected: (_) {
-                  setState(() {
-                    _selectedPeriod = p.$1;
-                    _selectedYear = null;
-                  });
-                  _loadData();
-                },
-                selectedColor: colorScheme.primaryContainer,
-                checkmarkColor: colorScheme.primary,
-              ),
-            );
-          }),
-          ..._availableYears.map((year) {
-            final isSelected = _selectedYear == year;
-            return Padding(
-              padding: const EdgeInsets.only(right: 8),
-              child: FilterChip(
-                label: Text('$year'),
-                selected: isSelected,
-                onSelected: (_) {
-                  setState(() {
-                    _selectedPeriod = _Period.year;
-                    _selectedYear = year;
-                  });
-                  _loadData();
-                },
-                selectedColor: colorScheme.primaryContainer,
-                checkmarkColor: colorScheme.primary,
-              ),
-            );
-          }),
-        ],
+  void _openTrack(MusicTrack track) {
+    context.read<Configuration>().playTrack(track.id!);
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => FullPlayerScreen(initialTrackId: track.id),
       ),
     );
   }
@@ -244,7 +207,13 @@ class _MostPlayedScreenState extends State<MostPlayedScreen> {
       ),
       body: Column(
         children: [
-          _buildFilterBar(),
+          PeriodFilterBar(
+            selectedPeriod: _selectedPeriod,
+            selectedYear: _selectedYear,
+            availableYears: _availableYears,
+            onPeriodSelected: _onPeriodSelected,
+            onYearSelected: _onYearSelected,
+          ),
           const Divider(height: 1),
           Expanded(
             child: _loading
@@ -262,84 +231,13 @@ class _MostPlayedScreenState extends State<MostPlayedScreen> {
                     separatorBuilder: (_, __) => const SizedBox(height: 4),
                     itemBuilder: (context, index) {
                       final stat = stats[index];
-                      final hasPlays = stat.seconds > 0;
-
-                      return ListTile(
-                        leading: _RankBadge(
-                          position: index + 1,
-                          colorScheme: colorScheme,
-                        ),
-                        title: Row(
-                          children: [
-                            Expanded(
-                              child: Text(
-                                stat.track.title,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                            if (!hasPlays)
-                              Container(
-                                margin: const EdgeInsets.only(left: 8),
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 6,
-                                  vertical: 2,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: colorScheme.surfaceContainerHighest,
-                                  borderRadius: BorderRadius.circular(4),
-                                ),
-                                child: Text(
-                                  'Nunca ouvida',
-                                  style: TextStyle(
-                                    fontSize: 10,
-                                    color: colorScheme.onSurfaceVariant,
-                                  ),
-                                ),
-                              ),
-                          ],
-                        ),
-                        subtitle: Text(
-                          stat.track.artist.split(';').first.trim(),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(color: colorScheme.onSurfaceVariant),
-                        ),
-                        trailing: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          crossAxisAlignment: CrossAxisAlignment.end,
-                          children: [
-                            if (hasPlays)
-                              Text(
-                                _formatSeconds(stat.seconds),
-                                style: TextStyle(
-                                  color: colorScheme.primary,
-                                  fontWeight: FontWeight.w600,
-                                  fontSize: 13,
-                                ),
-                              ),
-                            Text(
-                              _formatDuration(stat.track.durationMs),
-                              style: TextStyle(
-                                color: colorScheme.onSurfaceVariant,
-                                fontSize: 11,
-                              ),
-                            ),
-                          ],
-                        ),
-                        onTap: () {
-                          context.read<Configuration>().playTrack(
-                            stat.track.id!,
-                          );
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => FullPlayerScreen(
-                                initialTrackId: stat.track.id,
-                              ),
-                            ),
-                          );
-                        },
+                      return RankedTrackTile(
+                        position: index + 1,
+                        title: stat.track.title,
+                        artist: stat.track.artist.split(';').first.trim(),
+                        seconds: stat.seconds,
+                        durationMs: stat.track.durationMs,
+                        onTap: () => _openTrack(stat.track),
                       );
                     },
                   ),
@@ -349,40 +247,6 @@ class _MostPlayedScreenState extends State<MostPlayedScreen> {
     );
   }
 }
-
-class _RankBadge extends StatelessWidget {
-  final int position;
-  final ColorScheme colorScheme;
-
-  const _RankBadge({required this.position, required this.colorScheme});
-
-  @override
-  Widget build(BuildContext context) {
-    final isTop3 = position <= 3;
-    return Container(
-      width: 36,
-      height: 36,
-      decoration: BoxDecoration(
-        color: isTop3
-            ? colorScheme.primaryContainer
-            : colorScheme.surfaceContainerHighest,
-        shape: BoxShape.circle,
-      ),
-      child: Center(
-        child: Text(
-          '$position',
-          style: TextStyle(
-            fontWeight: FontWeight.bold,
-            color: isTop3 ? colorScheme.primary : colorScheme.onSurfaceVariant,
-            fontSize: 13,
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-enum _Period { lastMonth, lastQuarter, lastSemester, year }
 
 class _TrackStat {
   final MusicTrack track;

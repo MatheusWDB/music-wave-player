@@ -1,4 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:music_wave_player/components/listening_stats_section.dart';
+import 'package:music_wave_player/components/period_filter_bar.dart';
+import 'package:music_wave_player/components/stat_rank_tile.dart';
 import 'package:music_wave_player/data/play_session_database.dart';
 import 'package:music_wave_player/models/configuration.dart';
 import 'package:music_wave_player/models/music_track.dart';
@@ -14,7 +17,7 @@ class StatisticsScreen extends StatefulWidget {
 class _StatisticsScreenState extends State<StatisticsScreen>
     with SingleTickerProviderStateMixin {
   late final TabController _tabController;
-  _Period _selectedPeriod = _Period.lastMonth;
+  StatsPeriod _selectedPeriod = StatsPeriod.lastMonth;
   int? _selectedYear;
   List<int> _availableYears = [];
   bool _loading = true;
@@ -55,18 +58,43 @@ class _StatisticsScreenState extends State<StatisticsScreen>
 
   (DateTime, DateTime) _dateRange() {
     final now = DateTime.now();
-    if (_selectedPeriod == _Period.year && _selectedYear != null) {
+    if (_selectedPeriod == StatsPeriod.year && _selectedYear != null) {
       return (
         DateTime(_selectedYear!),
         DateTime(_selectedYear! + 1).subtract(const Duration(milliseconds: 1)),
       );
     }
     return switch (_selectedPeriod) {
-      _Period.lastMonth => (DateTime(now.year, now.month - 1, now.day), now),
-      _Period.lastQuarter => (DateTime(now.year, now.month - 3, now.day), now),
-      _Period.lastSemester => (DateTime(now.year, now.month - 6, now.day), now),
-      _Period.year => (DateTime(now.year), now),
+      StatsPeriod.lastMonth => (
+        DateTime(now.year, now.month - 1, now.day),
+        now,
+      ),
+      StatsPeriod.lastQuarter => (
+        DateTime(now.year, now.month - 3, now.day),
+        now,
+      ),
+      StatsPeriod.lastSemester => (
+        DateTime(now.year, now.month - 6, now.day),
+        now,
+      ),
+      StatsPeriod.year => (DateTime(now.year), now),
     };
+  }
+
+  void _onPeriodSelected(StatsPeriod period) {
+    setState(() {
+      _selectedPeriod = period;
+      _selectedYear = null;
+    });
+    _loadData();
+  }
+
+  void _onYearSelected(int year) {
+    setState(() {
+      _selectedPeriod = StatsPeriod.year;
+      _selectedYear = year;
+    });
+    _loadData();
   }
 
   // ── Agrupamentos ──────────────────────────────────────────────────────────
@@ -98,76 +126,6 @@ class _StatisticsScreenState extends State<StatisticsScreen>
     return result;
   }
 
-  // ── Helpers ───────────────────────────────────────────────────────────────
-
-  String _formatSeconds(int seconds) {
-    if (seconds < 60) return '${seconds}s';
-    final m = seconds ~/ 60;
-    if (m < 60) return '${m}min';
-    final h = m ~/ 60;
-    final rem = m % 60;
-    return rem > 0 ? '${h}h ${rem}min' : '${h}h';
-  }
-
-  // ── Filtro UI ─────────────────────────────────────────────────────────────
-
-  Widget _buildFilterBar() {
-    final colorScheme = Theme.of(context).colorScheme;
-
-    final periods = [
-      (_Period.lastMonth, 'Último mês'),
-      (_Period.lastQuarter, 'Trimestre'),
-      (_Period.lastSemester, 'Semestre'),
-    ];
-
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      child: Row(
-        children: [
-          ...periods.map((p) {
-            final isSelected = _selectedPeriod == p.$1 && _selectedYear == null;
-            return Padding(
-              padding: const EdgeInsets.only(right: 8),
-              child: FilterChip(
-                label: Text(p.$2),
-                selected: isSelected,
-                onSelected: (_) {
-                  setState(() {
-                    _selectedPeriod = p.$1;
-                    _selectedYear = null;
-                  });
-                  _loadData();
-                },
-                selectedColor: colorScheme.primaryContainer,
-                checkmarkColor: colorScheme.primary,
-              ),
-            );
-          }),
-          ..._availableYears.map((year) {
-            final isSelected = _selectedYear == year;
-            return Padding(
-              padding: const EdgeInsets.only(right: 8),
-              child: FilterChip(
-                label: Text('$year'),
-                selected: isSelected,
-                onSelected: (_) {
-                  setState(() {
-                    _selectedPeriod = _Period.year;
-                    _selectedYear = year;
-                  });
-                  _loadData();
-                },
-                selectedColor: colorScheme.primaryContainer,
-                checkmarkColor: colorScheme.primary,
-              ),
-            );
-          }),
-        ],
-      ),
-    );
-  }
-
   // ── Build ─────────────────────────────────────────────────────────────────
 
   @override
@@ -187,7 +145,13 @@ class _StatisticsScreenState extends State<StatisticsScreen>
       ),
       body: Column(
         children: [
-          _buildFilterBar(),
+          PeriodFilterBar(
+            selectedPeriod: _selectedPeriod,
+            selectedYear: _selectedYear,
+            availableYears: _availableYears,
+            onPeriodSelected: _onPeriodSelected,
+            onYearSelected: _onYearSelected,
+          ),
           const Divider(height: 1),
           Expanded(
             child: _loading
@@ -195,14 +159,8 @@ class _StatisticsScreenState extends State<StatisticsScreen>
                 : TabBarView(
                     controller: _tabController,
                     children: [
-                      _TrackStatsTab(
-                        stats: _trackStats(tracks),
-                        formatSeconds: _formatSeconds,
-                      ),
-                      _ArtistStatsTab(
-                        stats: _artistStats(tracks),
-                        formatSeconds: _formatSeconds,
-                      ),
+                      _TrackStatsTab(stats: _trackStats(tracks)),
+                      _ArtistStatsTab(stats: _artistStats(tracks)),
                     ],
                   ),
           ),
@@ -216,9 +174,8 @@ class _StatisticsScreenState extends State<StatisticsScreen>
 
 class _TrackStatsTab extends StatelessWidget {
   final List<_TrackStat> stats;
-  final String Function(int) formatSeconds;
 
-  const _TrackStatsTab({required this.stats, required this.formatSeconds});
+  const _TrackStatsTab({required this.stats});
 
   @override
   Widget build(BuildContext context) {
@@ -239,26 +196,11 @@ class _TrackStatsTab extends StatelessWidget {
       separatorBuilder: (_, __) => const SizedBox(height: 4),
       itemBuilder: (context, index) {
         final stat = stats[index];
-        return ListTile(
-          leading: _RankBadge(position: index + 1, colorScheme: colorScheme),
-          title: Text(
-            stat.track.title,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-          ),
-          subtitle: Text(
-            stat.track.artist.split(';').first.trim(),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(color: colorScheme.onSurfaceVariant),
-          ),
-          trailing: Text(
-            formatSeconds(stat.seconds),
-            style: TextStyle(
-              color: colorScheme.primary,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
+        return StatRankTile(
+          position: index + 1,
+          title: stat.track.title,
+          subtitle: stat.track.artist.split(';').first.trim(),
+          timeLabel: ListeningStatsSection.formatSeconds(stat.seconds),
         );
       },
     );
@@ -269,9 +211,8 @@ class _TrackStatsTab extends StatelessWidget {
 
 class _ArtistStatsTab extends StatelessWidget {
   final List<_ArtistStat> stats;
-  final String Function(int) formatSeconds;
 
-  const _ArtistStatsTab({required this.stats, required this.formatSeconds});
+  const _ArtistStatsTab({required this.stats});
 
   @override
   Widget build(BuildContext context) {
@@ -292,63 +233,17 @@ class _ArtistStatsTab extends StatelessWidget {
       separatorBuilder: (_, __) => const SizedBox(height: 4),
       itemBuilder: (context, index) {
         final stat = stats[index];
-        return ListTile(
-          leading: _RankBadge(position: index + 1, colorScheme: colorScheme),
-          title: Text(
-            stat.artist,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-          ),
-          trailing: Text(
-            formatSeconds(stat.seconds),
-            style: TextStyle(
-              color: colorScheme.primary,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
+        return StatRankTile(
+          position: index + 1,
+          title: stat.artist,
+          timeLabel: ListeningStatsSection.formatSeconds(stat.seconds),
         );
       },
     );
   }
 }
 
-// ── Widgets auxiliares ────────────────────────────────────────────────────────
-
-class _RankBadge extends StatelessWidget {
-  final int position;
-  final ColorScheme colorScheme;
-
-  const _RankBadge({required this.position, required this.colorScheme});
-
-  @override
-  Widget build(BuildContext context) {
-    final isTop3 = position <= 3;
-    return Container(
-      width: 36,
-      height: 36,
-      decoration: BoxDecoration(
-        color: isTop3
-            ? colorScheme.primaryContainer
-            : colorScheme.surfaceContainerHighest,
-        shape: BoxShape.circle,
-      ),
-      child: Center(
-        child: Text(
-          '$position',
-          style: TextStyle(
-            fontWeight: FontWeight.bold,
-            color: isTop3 ? colorScheme.primary : colorScheme.onSurfaceVariant,
-            fontSize: 13,
-          ),
-        ),
-      ),
-    );
-  }
-}
-
 // ── Modelos internos ──────────────────────────────────────────────────────────
-
-enum _Period { lastMonth, lastQuarter, lastSemester, year }
 
 class _TrackStat {
   final MusicTrack track;

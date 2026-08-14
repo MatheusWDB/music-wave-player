@@ -1,11 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:music_wave_player/components/speed_options_list.dart';
 import 'package:music_wave_player/models/configuration.dart';
 import 'package:provider/provider.dart';
 
 class SpeedBottomSheet extends StatelessWidget {
   const SpeedBottomSheet._();
-
-  static const _speeds = [0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0];
 
   static void show(BuildContext context) {
     showModalBottomSheet(
@@ -20,7 +19,6 @@ class SpeedBottomSheet extends StatelessWidget {
     final colorScheme = Theme.of(context).colorScheme;
     final bottomInset = MediaQuery.of(context).padding.bottom;
     final config = context.watch<Configuration>();
-    final current = config.playbackSpeed;
 
     return Material(
       color: colorScheme.surface,
@@ -57,34 +55,13 @@ class SpeedBottomSheet extends StatelessWidget {
                 ],
               ),
               const SizedBox(height: 16),
-              ..._speeds.map((speed) {
-                final isSelected = speed == current;
-                return ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  leading: Icon(
-                    Icons.check,
-                    size: 18,
-                    color: isSelected
-                        ? colorScheme.primary
-                        : Colors.transparent,
-                  ),
-                  title: Text(
-                    speed == 1.0 ? 'Normal (1.0x)' : '${speed}x',
-                    style: TextStyle(
-                      color: isSelected
-                          ? colorScheme.primary
-                          : colorScheme.onSurface,
-                      fontWeight: isSelected
-                          ? FontWeight.bold
-                          : FontWeight.normal,
-                    ),
-                  ),
-                  onTap: () {
-                    context.read<Configuration>().setPlaybackSpeed(speed);
-                    Navigator.pop(context);
-                  },
-                );
-              }),
+              SpeedOptionsList(
+                currentSpeed: config.playbackSpeed,
+                onSpeedSelected: (speed) {
+                  context.read<Configuration>().setPlaybackSpeed(speed);
+                  Navigator.pop(context);
+                },
+              ),
             ],
           ),
         ),

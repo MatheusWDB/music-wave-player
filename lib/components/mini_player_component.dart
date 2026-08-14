@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:music_wave_player/components/cover_art_widget.dart';
 import 'package:music_wave_player/components/favorite_button.dart';
+import 'package:music_wave_player/components/mini_player_controls.dart';
 import 'package:music_wave_player/models/configuration.dart';
 import 'package:music_wave_player/models/music_track.dart';
 import 'package:music_wave_player/screens/full_player_screen.dart';
@@ -37,14 +38,12 @@ class MiniPlayerComponent extends StatelessWidget {
         ),
         child: Row(
           children: [
-            // Capa do álbum
             CoverArtWidget(
               coverPath: currentTrack.coverPath,
               size: 45,
               borderRadius: BorderRadius.circular(5),
             ),
             const SizedBox(width: 10),
-            // Título e artista
             Expanded(
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
@@ -70,20 +69,11 @@ class MiniPlayerComponent extends StatelessWidget {
               ),
             ),
             FavoriteButton(trackId: currentTrack.id!, iconSize: 22),
-            IconButton(
-              onPressed: config.playPreviousTrack,
-              icon: Icon(Icons.skip_previous, color: colorScheme.primary),
-              iconSize: 28.0,
-            ),
-            IconButton(
-              onPressed: config.togglePlayPause,
-              icon: Icon(config.isPlaying ? Icons.pause : Icons.play_arrow),
-              iconSize: 32.0,
-            ),
-            IconButton(
-              onPressed: config.playNextTrack,
-              icon: Icon(Icons.skip_next, color: colorScheme.primary),
-              iconSize: 28.0,
+            MiniPlayerControls(
+              isPlaying: config.isPlaying,
+              onPrevious: config.playPreviousTrack,
+              onPlayPause: config.togglePlayPause,
+              onNext: config.playNextTrack,
             ),
           ],
         ),

@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:music_wave_player/components/sort_button.dart';
+import 'package:music_wave_player/components/tabs_sort_header.dart';
 import 'package:music_wave_player/models/configuration.dart';
 import 'package:music_wave_player/models/music_track.dart';
 import 'package:music_wave_player/tabs/musics_tab.dart';
@@ -151,27 +151,11 @@ class _TabsComponentState extends State<TabsComponent>
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 4.0),
-                      child: Row(
-                        children: [
-                          Expanded(
-                            child: Text(
-                              _tabTitles[_activeMenu],
-                              style: TextStyle(
-                                color: colorScheme.onSurfaceVariant,
-                                fontSize: 13.0,
-                                fontWeight: FontWeight.w500,
-                              ),
-                            ),
-                          ),
-                          SortButton(
-                            current: _currentSort(config),
-                            options: _currentOptions(),
-                            onSelected: (opt) => _onSortSelected(opt, config),
-                          ),
-                        ],
-                      ),
+                    TabsSortHeader(
+                      title: _tabTitles[_activeMenu],
+                      currentSort: _currentSort(config),
+                      sortOptions: _currentOptions(),
+                      onSortSelected: (opt) => _onSortSelected(opt, config),
                     ),
                     tracks.isNotEmpty
                         ? Expanded(

@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:music_wave_player/components/pick_playlist_dialog.dart';
 import 'package:music_wave_player/data/playlist_database.dart';
 import 'package:music_wave_player/models/configuration.dart';
 import 'package:music_wave_player/models/music_track.dart';
-import 'package:music_wave_player/models/playlist.dart';
 import 'package:provider/provider.dart';
 
 class EditTrackBottomSheet extends StatefulWidget {
@@ -71,23 +71,11 @@ class _EditTrackBottomSheetState extends State<EditTrackBottomSheet> {
     final playlists = await PlaylistDatabase.instance.readAllPlaylists();
     if (!mounted) return;
 
-    final result = await showDialog<dynamic>(
-      context: context,
-      builder: (_) => _PickPlaylistDialog(playlists: playlists),
+    final playlistId = await PickPlaylistDialog.show(
+      context,
+      playlists: playlists,
     );
-    if (result == null) return;
-
-    int playlistId;
-    if (result is String) {
-      final newPlaylist = await PlaylistDatabase.instance.createPlaylist(
-        result,
-      );
-      playlistId = newPlaylist.id!;
-    } else if (result is int) {
-      playlistId = result;
-    } else {
-      return;
-    }
+    if (playlistId == null) return;
 
     await PlaylistDatabase.instance.addTracks(playlistId, [widget.track.id!]);
     if (mounted) {
@@ -265,79 +253,6 @@ class _Field extends StatelessWidget {
         filled: true,
         fillColor: colorScheme.surfaceContainerHighest.withValues(alpha: 0.4),
       ),
-    );
-  }
-}
-
-class _PickPlaylistDialog extends StatelessWidget {
-  final List<Playlist> playlists;
-  const _PickPlaylistDialog({required this.playlists});
-
-  @override
-  Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    return AlertDialog(
-      title: const Text('Adicionar à playlist'),
-      content: SizedBox(
-        width: double.maxFinite,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(
-              leading: Icon(
-                Icons.add_circle_outline,
-                color: colorScheme.primary,
-              ),
-              title: const Text('Nova playlist'),
-              onTap: () async {
-                final controller = TextEditingController();
-                final name = await showDialog<String>(
-                  context: context,
-                  builder: (_) => AlertDialog(
-                    title: const Text('Nome da playlist'),
-                    content: TextField(
-                      controller: controller,
-                      autofocus: true,
-                      decoration: const InputDecoration(labelText: 'Nome'),
-                    ),
-                    actions: [
-                      TextButton(
-                        onPressed: () => Navigator.pop(context),
-                        child: const Text('Cancelar'),
-                      ),
-                      FilledButton(
-                        onPressed: () =>
-                            Navigator.pop(context, controller.text.trim()),
-                        child: const Text('Criar'),
-                      ),
-                    ],
-                  ),
-                );
-                if (name != null && name.isNotEmpty && context.mounted) {
-                  Navigator.pop(context, name);
-                }
-              },
-            ),
-            if (playlists.isNotEmpty) const Divider(),
-            ...playlists.map(
-              (p) => ListTile(
-                leading: const Icon(Icons.library_music_outlined),
-                title: Text(p.name),
-                subtitle: Text(
-                  '${p.trackIds.length} música${p.trackIds.length == 1 ? '' : 's'}',
-                ),
-                onTap: () => Navigator.pop(context, p.id),
-              ),
-            ),
-          ],
-        ),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context),
-          child: const Text('Cancelar'),
-        ),
-      ],
     );
   }
 }

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:music_wave_player/components/grouped_entity_tile.dart';
 import 'package:music_wave_player/models/music_track.dart';
 import 'package:music_wave_player/screens/artist_detail_screen.dart';
 
@@ -26,7 +27,6 @@ class ArtistsTab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
     final grouped = _groupByArtist();
     final artists = grouped.keys.toList();
 
@@ -38,29 +38,11 @@ class ArtistsTab extends StatelessWidget {
         final artist = artists[index];
         final artistTracks = grouped[artist]!;
 
-        return ListTile(
-          leading: CircleAvatar(
-            backgroundColor: colorScheme.primaryContainer,
-            child: Icon(Icons.person, color: colorScheme.onPrimaryContainer),
-          ),
-          title: Text(
-            artist,
-            style: TextStyle(
-              color: colorScheme.onSurface,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-          subtitle: Text(
-            '${artistTracks.length} música${artistTracks.length == 1 ? '' : 's'}',
-            style: TextStyle(
-              color: colorScheme.onSurfaceVariant,
-              fontSize: 12.0,
-            ),
-          ),
-          trailing: Icon(
-            Icons.chevron_right,
-            color: colorScheme.onSurfaceVariant,
-          ),
+        return GroupedEntityTile(
+          leading: const EntityAvatarIcon(icon: Icons.person),
+          title: artist,
+          subtitle:
+              '${artistTracks.length} música${artistTracks.length == 1 ? '' : 's'}',
           onTap: () => Navigator.push(
             context,
             MaterialPageRoute(
