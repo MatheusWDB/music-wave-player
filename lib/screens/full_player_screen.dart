@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:music_wave_player/components/cover_art_widget.dart';
 import 'package:music_wave_player/components/edit_track_bottom_sheet.dart';
 import 'package:music_wave_player/components/favorite_button.dart';
@@ -11,49 +12,60 @@ import 'package:music_wave_player/components/rating_bottom_sheet.dart';
 import 'package:music_wave_player/components/smooth_progress_slider.dart';
 import 'package:music_wave_player/components/timer_bottom_sheet.dart';
 import 'package:music_wave_player/components/track_info_header.dart';
-import 'package:music_wave_player/models/configuration.dart';
 import 'package:music_wave_player/models/music_track.dart';
-import 'package:music_wave_player/services/timer_service.dart';
-import 'package:provider/provider.dart';
+import 'package:music_wave_player/providers/current_track_provider.dart';
+import 'package:music_wave_player/providers/indexing_notifier.dart';
+import 'package:music_wave_player/providers/music_audio_handler_provider.dart';
+import 'package:music_wave_player/providers/player_settings_notifier.dart';
+import 'package:music_wave_player/providers/playback_notifier.dart';
+import 'package:music_wave_player/providers/timer_notifier.dart';
 
-class FullPlayerScreen extends StatefulWidget {
+class FullPlayerScreen extends ConsumerStatefulWidget {
   final int? initialTrackId;
   const FullPlayerScreen({super.key, this.initialTrackId});
 
   @override
-  State<FullPlayerScreen> createState() => _FullPlayerScreenState();
+  ConsumerState<FullPlayerScreen> createState() => _FullPlayerScreenState();
 }
 
-class _FullPlayerScreenState extends State<FullPlayerScreen>
+class _FullPlayerScreenState extends ConsumerState<FullPlayerScreen>
     with SingleTickerProviderStateMixin {
   double? _draggingValue;
 
   @override
   Widget build(BuildContext context) {
-    final currentTrack = context.select<Configuration, MusicTrack?>(
-      (c) => c.currentTrack,
+    final currentTrack = ref.watch(currentTrackProvider);
+    final playbackState = ref.watch(playbackNotifierProvider).valueOrNull;
+    final isPlaying = playbackState?.isPlaying ?? false;
+    final isShuffleActive = playbackState?.isShuffleActive ?? false;
+    final repeatMode = playbackState?.repeatMode ?? 'Off';
+    final timerActive = ref.watch(
+      timerNotifierProvider.select((s) => s.isActive),
     );
-    final isPlaying = context.select<Configuration, bool>((c) => c.isPlaying);
-    final isShuffleActive = context.select<Configuration, bool>(
-      (c) => c.isShuffleActive,
-    );
-    final repeatMode = context.select<Configuration, String>(
-      (c) => c.repeatMode,
-    );
-    final timerActive = context.select<SleepTimerService, bool>(
-      (t) => t.isActive,
-    );
-    final config = context.read<Configuration>();
+    final indexedTracks =
+        ref.watch(indexingNotifierProvider).valueOrNull?.indexedTracks ??
+        const <MusicTrack>[];
     final colorScheme = Theme.of(context).colorScheme;
     final isLandscape =
         MediaQuery.of(context).orientation == Orientation.landscape;
 
     if (currentTrack == null) {
       if (widget.initialTrackId != null &&
-          config.lastPlayedMusicId != widget.initialTrackId) {
-        WidgetsBinding.instance.addPostFrameCallback(
-          (_) => config.playTrack(widget.initialTrackId!),
-        );
+          playbackState?.lastPlayedMusicId != widget.initialTrackId) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          final track = indexedTracks
+              .where((t) => t.id == widget.initialTrackId)
+              .firstOrNull;
+          if (track != null) {
+            ref
+                .read(playbackNotifierProvider.notifier)
+                .playTrack(
+                  widget.initialTrackId!,
+                  indexedTracks: indexedTracks,
+                  trackPath: track.path,
+                );
+          }
+        });
         return const Scaffold(body: Center(child: CircularProgressIndicator()));
       }
       return Scaffold(
@@ -81,13 +93,17 @@ class _FullPlayerScreenState extends State<FullPlayerScreen>
       onDragStart: (v) => setState(() => _draggingValue = v),
       onDragUpdate: (v) => setState(() => _draggingValue = v),
       onDragEnd: (v) {
-        config.seekTo(v.toInt());
+        ref
+            .read(musicAudioHandlerProvider)
+            .seek(Duration(milliseconds: v.toInt()));
         setState(() => _draggingValue = null);
       },
     );
 
-    final playbackSpeed = context.select<Configuration, double>(
-      (c) => c.playbackSpeed,
+    final playbackSpeed = ref.watch(
+      playerSettingsNotifierProvider.select(
+        (s) => s.valueOrNull?.playbackSpeed ?? 1.0,
+      ),
     );
 
     final controls = PlaybackControlsRow(
@@ -95,11 +111,22 @@ class _FullPlayerScreenState extends State<FullPlayerScreen>
       isShuffleActive: isShuffleActive,
       repeatMode: repeatMode,
       playbackSpeed: playbackSpeed,
-      onShuffleToggle: config.toggleShuffle,
-      onPrevious: config.playPreviousTrack,
-      onPlayPause: config.togglePlayPause,
-      onNext: config.playNextTrack,
-      onRepeatToggle: config.toggleRepeatMode,
+      onShuffleToggle: () =>
+          ref.read(playbackNotifierProvider.notifier).toggleShuffle(),
+      onPrevious: () => ref
+          .read(playbackNotifierProvider.notifier)
+          .playPreviousTrack(indexedTracks: indexedTracks),
+      onPlayPause: () => ref
+          .read(playbackNotifierProvider.notifier)
+          .togglePlayPause(
+            indexedTracks: indexedTracks,
+            currentTrackPath: currentTrack.path,
+          ),
+      onNext: () => ref
+          .read(playbackNotifierProvider.notifier)
+          .playNextTrack(indexedTracks: indexedTracks),
+      onRepeatToggle: () =>
+          ref.read(playbackNotifierProvider.notifier).toggleRepeatMode(),
     );
 
     return Scaffold(

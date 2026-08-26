@@ -1,19 +1,19 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:music_wave_player/components/hidden_track_tile.dart';
 import 'package:music_wave_player/components/unhide_action_bar.dart';
 import 'package:music_wave_player/data/music_database.dart';
-import 'package:music_wave_player/models/configuration.dart';
 import 'package:music_wave_player/models/music_track.dart';
-import 'package:provider/provider.dart';
+import 'package:music_wave_player/providers/indexing_notifier.dart';
 
-class HiddenTracksScreen extends StatefulWidget {
+class HiddenTracksScreen extends ConsumerStatefulWidget {
   const HiddenTracksScreen({super.key});
 
   @override
-  State<HiddenTracksScreen> createState() => _HiddenTracksScreenState();
+  ConsumerState<HiddenTracksScreen> createState() => _HiddenTracksScreenState();
 }
 
-class _HiddenTracksScreenState extends State<HiddenTracksScreen> {
+class _HiddenTracksScreenState extends ConsumerState<HiddenTracksScreen> {
   List<MusicTrack> _tracks = [];
   final Set<int> _selected = {};
   bool _loading = true;
@@ -52,7 +52,7 @@ class _HiddenTracksScreenState extends State<HiddenTracksScreen> {
   Future<void> _unhideSelected() async {
     final ids = _selected.toList();
     _clearSelection();
-    await context.read<Configuration>().unhideTracks(ids);
+    await ref.read(indexingNotifierProvider.notifier).unhideTracks(ids);
     await _load();
   }
 
@@ -75,7 +75,7 @@ class _HiddenTracksScreenState extends State<HiddenTracksScreen> {
       ),
     );
     if (confirmed != true) return;
-    await context.read<Configuration>().unhideAllTracks();
+    await ref.read(indexingNotifierProvider.notifier).unhideAllTracks();
     await _load();
   }
 

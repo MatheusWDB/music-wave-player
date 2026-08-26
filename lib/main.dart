@@ -1,11 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:music_wave_player/models/configuration.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:music_wave_player/screens/library_screen.dart';
-import 'package:music_wave_player/services/music_audio_handler.dart';
-import 'package:music_wave_player/services/timer_service.dart';
 import 'package:permission_handler/permission_handler.dart';
-import 'package:provider/provider.dart';
 
 const Color colorBgDark = Color(0xFF0D1B2A);
 const Color colorSurface = Color(0xFF1D3557);
@@ -49,27 +46,10 @@ Future<void> main() async {
     ),
   );
 
-  final config = Configuration.empty();
-
-  final handler = MusicAudioHandler(config);
-  config.audioHandler = handler;
-
-  final timerService = SleepTimerService(config);
-  handler.setTimerService(timerService);
-
-  runApp(
-    MultiProvider(
-      providers: [
-        ChangeNotifierProvider<Configuration>.value(value: config),
-        ChangeNotifierProvider<SleepTimerService>.value(value: timerService),
-      ],
-      child: const MyApp(),
-    ),
-  );
+  runApp(const ProviderScope(child: MyApp()));
 
   WidgetsBinding.instance.addPostFrameCallback((_) async {
     await Permission.notification.request();
-    await config.loadFromStorageAsync();
   });
 }
 

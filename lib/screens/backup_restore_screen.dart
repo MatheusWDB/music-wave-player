@@ -5,24 +5,24 @@ import 'dart:typed_data';
 import 'package:file_picker/file_picker.dart';
 import 'package:file_saver/file_saver.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import 'package:music_wave_player/components/backup_export_section.dart';
 import 'package:music_wave_player/components/backup_restore_section.dart';
 import 'package:music_wave_player/main.dart';
-import 'package:music_wave_player/models/configuration.dart';
 import 'package:music_wave_player/services/backup_service.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package:provider/provider.dart';
 import 'package:share_plus/share_plus.dart';
 
-class BackupRestoreScreen extends StatefulWidget {
+class BackupRestoreScreen extends ConsumerStatefulWidget {
   const BackupRestoreScreen({super.key});
 
   @override
-  State<BackupRestoreScreen> createState() => _BackupRestoreScreenState();
+  ConsumerState<BackupRestoreScreen> createState() =>
+      _BackupRestoreScreenState();
 }
 
-class _BackupRestoreScreenState extends State<BackupRestoreScreen> {
+class _BackupRestoreScreenState extends ConsumerState<BackupRestoreScreen> {
   bool _sharing = false;
   bool _savingToFolder = false;
   bool _pickingImportFile = false;
@@ -51,8 +51,7 @@ class _BackupRestoreScreenState extends State<BackupRestoreScreen> {
     if (_sharing) return;
     setState(() => _sharing = true);
     try {
-      final config = context.read<Configuration>();
-      final content = await BackupService.buildBackup(config);
+      final content = await BackupService.buildBackup(ref);
 
       final dir = await getTemporaryDirectory();
       final fileName = '${_generateBaseFileName()}.mwp';
@@ -76,8 +75,7 @@ class _BackupRestoreScreenState extends State<BackupRestoreScreen> {
     if (_savingToFolder) return;
     setState(() => _savingToFolder = true);
     try {
-      final config = context.read<Configuration>();
-      final content = await BackupService.buildBackup(config);
+      final content = await BackupService.buildBackup(ref);
       final bytes = Uint8List.fromList(utf8.encode(content));
 
       final savedPath = await FileSaver.instance.saveAs(
@@ -134,10 +132,9 @@ class _BackupRestoreScreenState extends State<BackupRestoreScreen> {
   }
 
   Future<void> _startRestore(BackupData data) async {
-    final config = context.read<Configuration>();
     AppMessenger.show('Restaurando backup em segundo plano...');
 
-    final summary = await BackupService.restore(data: data, config: config);
+    final summary = await BackupService.restore(data: data, ref: ref);
 
     AppMessenger.show(
       'Restauração concluída: ${summary.playlistsRestored} playlist${summary.playlistsRestored == 1 ? '' : 's'}, '

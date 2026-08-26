@@ -1,27 +1,41 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:music_wave_player/components/cover_art_widget.dart';
 import 'package:music_wave_player/components/favorite_button.dart';
 import 'package:music_wave_player/components/mini_player_controls.dart';
-import 'package:music_wave_player/models/configuration.dart';
 import 'package:music_wave_player/models/music_track.dart';
+import 'package:music_wave_player/providers/current_track_provider.dart';
+import 'package:music_wave_player/providers/indexing_notifier.dart';
+import 'package:music_wave_player/providers/playback_notifier.dart';
 import 'package:music_wave_player/screens/full_player_screen.dart';
-import 'package:provider/provider.dart';
 
-class MiniPlayerComponent extends StatelessWidget {
+class MiniPlayerComponent extends ConsumerWidget {
   const MiniPlayerComponent({super.key});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final ColorScheme colorScheme = Theme.of(context).colorScheme;
-    final config = context.watch<Configuration>();
 
-    final MusicTrack? currentTrack = config.currentTrack;
+    final MusicTrack? currentTrack = ref.watch(currentTrackProvider);
     if (currentTrack == null) return const SizedBox.shrink();
+
+    final isPlaying = ref.watch(
+      playbackNotifierProvider.select((s) => s.valueOrNull?.isPlaying ?? false),
+    );
+    final indexedTracks =
+        ref.watch(indexingNotifierProvider).valueOrNull?.indexedTracks ??
+        const <MusicTrack>[];
 
     return GestureDetector(
       onTap: () {
         final int trackId = currentTrack.id!;
-        config.playTrack(trackId);
+        ref
+            .read(playbackNotifierProvider.notifier)
+            .playTrack(
+              trackId,
+              indexedTracks: indexedTracks,
+              trackPath: currentTrack.path,
+            );
         Navigator.push(
           context,
           MaterialPageRoute(
@@ -70,10 +84,19 @@ class MiniPlayerComponent extends StatelessWidget {
             ),
             FavoriteButton(trackId: currentTrack.id!, iconSize: 22),
             MiniPlayerControls(
-              isPlaying: config.isPlaying,
-              onPrevious: config.playPreviousTrack,
-              onPlayPause: config.togglePlayPause,
-              onNext: config.playNextTrack,
+              isPlaying: isPlaying,
+              onPrevious: () => ref
+                  .read(playbackNotifierProvider.notifier)
+                  .playPreviousTrack(indexedTracks: indexedTracks),
+              onPlayPause: () => ref
+                  .read(playbackNotifierProvider.notifier)
+                  .togglePlayPause(
+                    indexedTracks: indexedTracks,
+                    currentTrackPath: currentTrack.path,
+                  ),
+              onNext: () => ref
+                  .read(playbackNotifierProvider.notifier)
+                  .playNextTrack(indexedTracks: indexedTracks),
             ),
           ],
         ),

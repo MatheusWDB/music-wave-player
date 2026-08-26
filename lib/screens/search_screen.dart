@@ -1,24 +1,25 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:music_wave_player/components/rating_bottom_sheet.dart';
 import 'package:music_wave_player/components/search_results_list.dart';
 import 'package:music_wave_player/data/playlist_database.dart';
-import 'package:music_wave_player/models/configuration.dart';
 import 'package:music_wave_player/models/music_track.dart';
 import 'package:music_wave_player/models/playlist.dart';
+import 'package:music_wave_player/providers/indexing_notifier.dart';
+import 'package:music_wave_player/providers/playback_notifier.dart';
 import 'package:music_wave_player/screens/album_detail_screen.dart';
 import 'package:music_wave_player/screens/artist_detail_screen.dart';
 import 'package:music_wave_player/screens/full_player_screen.dart';
 import 'package:music_wave_player/screens/playlist_detail_screen.dart';
-import 'package:provider/provider.dart';
 
-class SearchScreen extends StatefulWidget {
+class SearchScreen extends ConsumerStatefulWidget {
   const SearchScreen({super.key});
 
   @override
-  State<SearchScreen> createState() => _SearchScreenState();
+  ConsumerState<SearchScreen> createState() => _SearchScreenState();
 }
 
-class _SearchScreenState extends State<SearchScreen> {
+class _SearchScreenState extends ConsumerState<SearchScreen> {
   final TextEditingController _controller = TextEditingController();
   List<Playlist> _playlists = [];
   String _query = '';
@@ -99,8 +100,10 @@ class _SearchScreenState extends State<SearchScreen> {
 
   // ── Ações ─────────────────────────────────────────────────────────────────
 
-  void _openTrack(MusicTrack track) {
-    context.read<Configuration>().playTrack(track.id!);
+  void _openTrack(MusicTrack track, List<MusicTrack> allTracks) {
+    ref
+        .read(playbackNotifierProvider.notifier)
+        .playTrack(track.id!, indexedTracks: allTracks, trackPath: track.path);
     Navigator.push(
       context,
       MaterialPageRoute(
@@ -141,7 +144,7 @@ class _SearchScreenState extends State<SearchScreen> {
   }
 
   Future<void> _hideTrack(MusicTrack track) async {
-    await context.read<Configuration>().hideTracks([track.id!]);
+    await ref.read(indexingNotifierProvider.notifier).hideTracks([track.id!]);
     setState(() => _query = _query);
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -158,8 +161,9 @@ class _SearchScreenState extends State<SearchScreen> {
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
-    final config = context.watch<Configuration>();
-    final allTracks = config.indexedTracks;
+    final allTracks =
+        ref.watch(indexingNotifierProvider).valueOrNull?.indexedTracks ??
+        const <MusicTrack>[];
 
     final tracks = _matchingTracks(allTracks);
     final artists = _matchingArtists(allTracks);
@@ -215,7 +219,7 @@ class _SearchScreenState extends State<SearchScreen> {
               artists: artists,
               albums: albums,
               playlists: playlists,
-              onTrackTap: _openTrack,
+              onTrackTap: (t) => _openTrack(t, allTracks),
               onArtistTap: _openArtist,
               onAlbumTap: _openAlbum,
               onPlaylistTap: _openPlaylist,

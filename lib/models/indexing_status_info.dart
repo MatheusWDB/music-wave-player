@@ -1,11 +1,11 @@
-import 'package:music_wave_player/models/configuration.dart';
+import 'package:music_wave_player/providers/indexing_notifier.dart';
 
 /// Resultado computado do estado de indexação, pronto para exibição.
 ///
 /// Centraliza a lógica de decisão de texto/progresso/habilitação do botão
 /// que antes vivia dentro do `build()` do [IndexingComponent] — sem
-/// nenhuma dependência de widgets, facilita tanto testes quanto a futura
-/// migração para um `computed`/`select` no Riverpod.
+/// nenhuma dependência de widgets, facilita tanto testes quanto o consumo
+/// direto do [IndexingState] do [IndexingNotifier].
 class IndexingStatusInfo {
   final String statusText;
   final double? progressValue;
@@ -21,22 +21,22 @@ class IndexingStatusInfo {
     required this.buttonLabel,
   });
 
-  factory IndexingStatusInfo.from(Configuration config) {
-    final isScanning = config.indexingStatus == IndexingStatus.scanning;
+  factory IndexingStatusInfo.from(IndexingState state) {
+    final isScanning = state.indexingStatus == IndexingStatus.scanning;
     final isProcessingMetadata =
-        config.indexingStatus == IndexingStatus.processingMetadata;
+        state.indexingStatus == IndexingStatus.processingMetadata;
     final isCalculatingLoudness =
-        config.indexingStatus == IndexingStatus.calculatingLoudness;
-    final isComplete = config.indexingStatus == IndexingStatus.complete;
-    final isBusy = isScanning || isProcessingMetadata || isCalculatingLoudness;
-    final isDirectorySet = config.rootDirectory != null;
+        state.indexingStatus == IndexingStatus.calculatingLoudness;
+    final isComplete = state.indexingStatus == IndexingStatus.complete;
+    final isBusy = state.isBusy;
+    final isDirectorySet = state.rootDirectory != null;
 
     String statusText = 'Pronto para começar.';
     double? progressValue = 0.0;
 
     if (isScanning) {
-      final total = config.indexedFileTotal;
-      final done = config.indexedFileCount;
+      final total = state.indexedFileTotal;
+      final done = state.indexedFileCount;
       final percent = total > 0
           ? ((done / total) * 100).toStringAsFixed(0)
           : '0';
@@ -45,11 +45,11 @@ class IndexingStatusInfo {
           : 'Varrendo e indexando...';
       progressValue = total > 0 ? done / total : null;
     } else if (isProcessingMetadata) {
-      statusText = config.processingStage ?? 'Processando metadados...';
+      statusText = state.processingStage ?? 'Processando metadados...';
       progressValue = null;
     } else if (isCalculatingLoudness) {
-      final total = config.loudnessTotal;
-      final done = config.loudnessDone;
+      final total = state.loudnessTotal;
+      final done = state.loudnessDone;
       final percent = total > 0
           ? ((done / total) * 100).toStringAsFixed(0)
           : '0';
@@ -57,9 +57,9 @@ class IndexingStatusInfo {
       progressValue = total > 0 ? done / total : null;
     } else if (isComplete) {
       statusText =
-          'Varredura concluída! ${config.indexedFileCount} arquivo'
-          '${config.indexedFileCount == 1 ? '' : 's'} indexado'
-          '${config.indexedFileCount == 1 ? '' : 's'}.';
+          'Varredura concluída! ${state.indexedFileCount} arquivo'
+          '${state.indexedFileCount == 1 ? '' : 's'} indexado'
+          '${state.indexedFileCount == 1 ? '' : 's'}.';
       progressValue = 1.0;
     } else if (isDirectorySet) {
       statusText = 'Clique em Iniciar Varredura.';

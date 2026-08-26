@@ -2,13 +2,17 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:mpv_audio_kit/mpv_audio_kit.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:music_wave_player/data/play_session_database.dart';
-import 'package:music_wave_player/models/configuration.dart';
-import 'package:music_wave_player/services/timer_service.dart';
+import 'package:music_wave_player/models/music_track.dart';
+import 'package:music_wave_player/providers/current_track_provider.dart';
+import 'package:music_wave_player/providers/indexing_notifier.dart';
+import 'package:music_wave_player/providers/playback_notifier.dart';
+import 'package:music_wave_player/providers/player_settings_notifier.dart';
+import 'package:music_wave_player/providers/timer_notifier.dart';
 
 class MusicAudioHandler {
-  final Configuration _config;
-  SleepTimerService? _timerService;
+  final Ref _ref;
 
   late final Player player;
 
@@ -46,7 +50,7 @@ class MusicAudioHandler {
   int _sessionSecondsSaved = 0;
   DateTime? _sessionStartedAt;
 
-  MusicAudioHandler(this._config) {
+  MusicAudioHandler(this._ref) {
     MpvAudioKit.ensureInitialized();
     player = Player(
       configuration: const PlayerConfiguration(
@@ -83,10 +87,6 @@ class MusicAudioHandler {
     );
   }
 
-  void setTimerService(SleepTimerService timerService) {
-    _timerService = timerService;
-  }
-
   /// Retorna true se a pausa atual foi causada pelo temporizador ao fim da
   /// faixa, e reseta a flag (consumo único). Ver comentário do campo
   /// [_pausedAtTrackEnd].
@@ -107,7 +107,7 @@ class MusicAudioHandler {
   // ── Equalizador ───────────────────────────────────────────────────────────
 
   /// Aplica o equalizador gráfico (filtro `superequalizer`) com os ganhos
-  /// calculados pelo [EqualizerService]. Chamado na inicialização (para
+  /// calculados pelo [EqualizerNotifier]. Chamado na inicialização (para
   /// restaurar o estado salvo) e sempre que o usuário altera banda, preset
   /// ou liga/desliga o EQ.
   Future<void> applyEqualizer(bool enabled, Map<String, double> params) async {
@@ -131,7 +131,7 @@ class MusicAudioHandler {
   /// do scan da indexação terminar), o gain é zerado — sem normalização —
   /// para não travar a reprodução.
   Future<void> _applyLoudnessGain() async {
-    final lufs = _config.currentTrack?.loudnessLufs;
+    final lufs = _ref.read(currentTrackProvider)?.loudnessLufs;
     if (lufs == null) {
       await player.setVolumeGain(0.0);
       return;
@@ -207,7 +207,9 @@ class MusicAudioHandler {
 
   void _initListeners() {
     _positionSub = player.stream.position.listen((pos) {
-      _config.updateCurrentPosition(pos.inMilliseconds);
+      _ref
+          .read(playbackNotifierProvider.notifier)
+          .updateCurrentPosition(pos.inMilliseconds);
 
       // Dispara fade out nos últimos X segundos da faixa atual
       if (_crossfadeDuration > 0 &&
@@ -228,7 +230,9 @@ class MusicAudioHandler {
 
     _durationSub = player.stream.duration.listen((dur) {
       if (dur > Duration.zero) {
-        _config.updateTrackDuration(dur.inMilliseconds);
+        _ref
+            .read(playbackNotifierProvider.notifier)
+            .updateTrackDuration(dur.inMilliseconds);
       }
     });
 
@@ -240,7 +244,7 @@ class MusicAudioHandler {
         _pauseSession();
         _stopPeriodicSave();
       }
-      _config.syncPlayingState(playing);
+      _ref.read(playbackNotifierProvider.notifier).syncPlayingState(playing);
       player.setMediaSession(_mediaSessionFor(playing: playing));
     });
 
@@ -262,13 +266,17 @@ class MusicAudioHandler {
           (duration - position).inMilliseconds <= 800;
       if (!isNearEnd) return;
 
-      final shouldPause = _timerService?.onTrackFinished() ?? false;
+      final shouldPause = _ref
+          .read(timerNotifierProvider.notifier)
+          .onTrackFinished();
       if (shouldPause) {
         _pausedAtTrackEnd = true;
         player.pause();
         return;
       }
-      _config.trackDidFinish();
+      _ref
+          .read(playbackNotifierProvider.notifier)
+          .trackDidFinish(indexedTracks: _indexedTracks);
     });
 
     _mediaCommandSub = player.stream.mediaSessionCommands.listen((command) {
@@ -283,19 +291,27 @@ class MusicAudioHandler {
         case MediaSessionCommandPlayPause():
           // O mpv_audio_kit auto-aplica play()/pause() no player nativo
           // ANTES de emitir este evento (ver player_media_session.part.dart
-          // do pacote), sem passar pelo nosso fluxo (PlaybackController).
+          // do pacote), sem passar pelo nosso fluxo (PlaybackNotifier).
           // Se a pausa atual veio do temporizador ao fim da faixa, esse
           // play() nativo só retomou a faixa já finalizada do zero —
           // corrige aqui chamando a mesma lógica de avanço/repetição usada
           // no fim natural da faixa.
           if (consumePausedAtTrackEnd()) {
-            _config.trackDidFinish();
+            _ref
+                .read(playbackNotifierProvider.notifier)
+                .trackDidFinish(indexedTracks: _indexedTracks);
           }
         default:
           break;
       }
     });
   }
+
+  /// Atalho para a lista de faixas indexadas, usada pelos métodos que
+  /// delegam navegação de fila ao [PlaybackNotifier].
+  List<MusicTrack> get _indexedTracks =>
+      _ref.read(indexingNotifierProvider).valueOrNull?.indexedTracks ??
+      const [];
 
   // ── Controles de reprodução ───────────────────────────────────────────────
 
@@ -308,7 +324,7 @@ class MusicAudioHandler {
 
     await _flushSession();
 
-    final track = _config.currentTrack;
+    final track = _ref.read(currentTrackProvider);
     if (track?.id != null) _startSession(track!.id!);
 
     final uri = 'file://$path';
@@ -331,17 +347,27 @@ class MusicAudioHandler {
       },
     );
 
-    if (_config.playbackSpeed != 1.0) {
-      await player.setRate(_config.playbackSpeed);
+    final playbackSpeed =
+        _ref.read(playerSettingsNotifierProvider).valueOrNull?.playbackSpeed ??
+        1.0;
+    if (playbackSpeed != 1.0) {
+      await player.setRate(playbackSpeed);
     }
 
-    if (_config.lastSeekPositionMs > 0) {
-      await player.seek(Duration(milliseconds: _config.lastSeekPositionMs));
-      _config.lastSeekPositionMs = 0;
+    final lastSeekPositionMs =
+        _ref.read(playbackNotifierProvider).valueOrNull?.lastSeekPositionMs ??
+        0;
+    if (lastSeekPositionMs > 0) {
+      await player.seek(Duration(milliseconds: lastSeekPositionMs));
+      _ref.read(playbackNotifierProvider.notifier).consumeLastSeekPosition();
     }
 
-    _config.updateTrackDuration(player.state.duration.inMilliseconds);
-    _config.updateCurrentPosition(player.state.position.inMilliseconds);
+    _ref
+        .read(playbackNotifierProvider.notifier)
+        .updateTrackDuration(player.state.duration.inMilliseconds);
+    _ref
+        .read(playbackNotifierProvider.notifier)
+        .updateCurrentPosition(player.state.position.inMilliseconds);
 
     await _applyLoudnessGain();
 
@@ -383,17 +409,21 @@ class MusicAudioHandler {
 
   Future<void> setSpeed(double speed) => player.setRate(speed);
 
-  Future<void> skipToNext() async => _config.playNextTrack();
+  Future<void> skipToNext() async => _ref
+      .read(playbackNotifierProvider.notifier)
+      .playNextTrack(indexedTracks: _indexedTracks);
 
-  Future<void> skipToPrevious() async => _config.playPreviousTrack();
+  Future<void> skipToPrevious() async => _ref
+      .read(playbackNotifierProvider.notifier)
+      .playPreviousTrack(indexedTracks: _indexedTracks);
 
   Future<void> stop() async {
     _crossfadeTimer?.cancel();
     _stopPeriodicSave();
     await _flushSession();
-    await _config.saveCurrentPositionForResume(
-      player.state.position.inMilliseconds,
-    );
+    await _ref
+        .read(playbackNotifierProvider.notifier)
+        .saveCurrentPositionForResume(player.state.position.inMilliseconds);
     await player.stop();
   }
 
@@ -401,7 +431,7 @@ class MusicAudioHandler {
 
   void _resumeSession() {
     if (_sessionTrackId == null) {
-      final id = _config.currentTrack?.id;
+      final id = _ref.read(currentTrackProvider)?.id;
       if (id == null) return;
       _startSession(id);
     }
@@ -488,9 +518,9 @@ class MusicAudioHandler {
     _periodicSaveTimer ??= Timer.periodic(const Duration(seconds: 5), (
       _,
     ) async {
-      await _config.saveCurrentPositionForResume(
-        player.state.position.inMilliseconds,
-      );
+      await _ref
+          .read(playbackNotifierProvider.notifier)
+          .saveCurrentPositionForResume(player.state.position.inMilliseconds);
       await _saveSessionDelta();
     });
   }

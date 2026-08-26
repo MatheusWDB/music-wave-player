@@ -1,26 +1,29 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:music_wave_player/components/playlist_header_card.dart';
 import 'package:music_wave_player/components/playlist_track_tile.dart';
 import 'package:music_wave_player/components/rating_bottom_sheet.dart';
 import 'package:music_wave_player/components/track_selection_bottom_sheet.dart';
 import 'package:music_wave_player/data/playlist_database.dart';
-import 'package:music_wave_player/models/configuration.dart';
 import 'package:music_wave_player/models/music_track.dart';
 import 'package:music_wave_player/models/playlist.dart';
+import 'package:music_wave_player/providers/indexing_notifier.dart';
+import 'package:music_wave_player/providers/playback_notifier.dart';
+import 'package:music_wave_player/providers/queue_notifier.dart';
 import 'package:music_wave_player/screens/full_player_screen.dart';
 import 'package:music_wave_player/services/favorites_service.dart';
-import 'package:provider/provider.dart';
 
-class PlaylistDetailScreen extends StatefulWidget {
+class PlaylistDetailScreen extends ConsumerStatefulWidget {
   final Playlist playlist;
 
   const PlaylistDetailScreen({super.key, required this.playlist});
 
   @override
-  State<PlaylistDetailScreen> createState() => _PlaylistDetailScreenState();
+  ConsumerState<PlaylistDetailScreen> createState() =>
+      _PlaylistDetailScreenState();
 }
 
-class _PlaylistDetailScreenState extends State<PlaylistDetailScreen> {
+class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
   late Playlist _playlist;
   bool _loading = false;
 
@@ -68,7 +71,7 @@ class _PlaylistDetailScreenState extends State<PlaylistDetailScreen> {
   }
 
   Future<void> _hideTrack(MusicTrack track) async {
-    await context.read<Configuration>().hideTracks([track.id!]);
+    await ref.read(indexingNotifierProvider.notifier).hideTracks([track.id!]);
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -127,11 +130,27 @@ class _PlaylistDetailScreenState extends State<PlaylistDetailScreen> {
     );
   }
 
+  Future<void> _playPlaylist(List<MusicTrack> allTracks) async {
+    final isShuffleActive =
+        ref.read(playbackNotifierProvider).valueOrNull?.isShuffleActive ??
+        false;
+    await ref
+        .read(playbackNotifierProvider.notifier)
+        .playPlaylist(
+          _playlist,
+          indexedTracks: allTracks,
+          shuffleActive: isShuffleActive,
+          pathForId: (id) =>
+              allTracks.where((t) => t.id == id).firstOrNull?.path,
+        );
+  }
+
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
-    final config = context.read<Configuration>();
-    final allTracks = config.indexedTracks;
+    final allTracks =
+        ref.watch(indexingNotifierProvider).valueOrNull?.indexedTracks ??
+        const <MusicTrack>[];
     final tracks = _getTracks(allTracks);
     final ids = tracks.map((t) => t.id!).toList();
 
@@ -148,13 +167,15 @@ class _PlaylistDetailScreenState extends State<PlaylistDetailScreen> {
           PopupMenuButton<String>(
             onSelected: (value) async {
               if (value == 'play') {
-                config.playPlaylist(_playlist);
-                Navigator.pop(context);
+                await _playPlaylist(allTracks);
+                if (context.mounted) Navigator.pop(context);
               } else if (value == 'insert_next') {
-                config.insertAfterCurrent(ids);
+                ref
+                    .read(queueNotifierProvider.notifier)
+                    .insertAfterCurrent(ids);
                 _showQueueSnack('Músicas adicionadas após a atual');
               } else if (value == 'add_end') {
-                config.addToEndOfQueue(ids);
+                ref.read(queueNotifierProvider.notifier).addToEnd(ids);
                 _showQueueSnack('Músicas adicionadas ao final da fila');
               }
             },
@@ -205,9 +226,9 @@ class _PlaylistDetailScreenState extends State<PlaylistDetailScreen> {
                     tracks.fold(0, (sum, t) => sum + t.durationMs),
                   ),
                   onPlay: tracks.isNotEmpty
-                      ? () {
-                          config.playPlaylist(_playlist);
-                          Navigator.pop(context);
+                      ? () async {
+                          await _playPlaylist(allTracks);
+                          if (context.mounted) Navigator.pop(context);
                         }
                       : null,
                 ),
@@ -234,7 +255,13 @@ class _PlaylistDetailScreenState extends State<PlaylistDetailScreen> {
                                   RatingBottomSheet.show(context, track: track),
                               onHide: () => _hideTrack(track),
                               onTap: () {
-                                config.playTrack(track.id!);
+                                ref
+                                    .read(playbackNotifierProvider.notifier)
+                                    .playTrack(
+                                      track.id!,
+                                      indexedTracks: allTracks,
+                                      trackPath: track.path,
+                                    );
                                 Navigator.push(
                                   context,
                                   MaterialPageRoute(

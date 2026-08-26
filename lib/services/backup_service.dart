@@ -3,13 +3,19 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:mpv_audio_kit/mpv_audio_kit.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:music_wave_player/data/music_database.dart';
 import 'package:music_wave_player/data/play_session_database.dart';
 import 'package:music_wave_player/data/playlist_database.dart';
-import 'package:music_wave_player/models/configuration.dart';
 import 'package:music_wave_player/models/music_track.dart';
+import 'package:music_wave_player/providers/equalizer_notifier.dart';
+import 'package:music_wave_player/providers/indexing_notifier.dart';
+import 'package:music_wave_player/providers/player_settings_notifier.dart';
+import 'package:music_wave_player/providers/sort_notifier.dart';
 import 'package:music_wave_player/services/cover_art_service.dart';
+import 'package:music_wave_player/services/equalizer_service.dart';
 import 'package:music_wave_player/services/metadata_parser.dart';
+import 'package:music_wave_player/services/sort_service.dart';
 
 const String _kBackupFormat = 'MWP_BACKUP';
 const int _kBackupVersion = 1;
@@ -123,12 +129,16 @@ class RestoreSummary {
 /// path exato primeiro e cai para título+artista (case-insensitive) se
 /// não encontrar. Se a faixa sumiu do banco mas o arquivo ainda existe no
 /// path salvo, ela é recriada automaticamente antes do merge.
+///
+/// Recebe um [Ref] em vez de um objeto `Configuration` — lê/escreve
+/// diretamente nos Notifiers correspondentes (Sort, PlayerSettings,
+/// Equalizer, Indexing).
 class BackupService {
   BackupService._();
 
   // ── Export ──────────────────────────────────────────────────────────────
 
-  static Future<String> buildBackup(Configuration config) async {
+  static Future<String> buildBackup(WidgetRef ref) async {
     final allTracks = await MusicDatabase.instance
         .readAllTracksIncludingHidden();
     final tracksById = {for (final t in allTracks) t.id: t};
@@ -136,22 +146,29 @@ class BackupService {
     final playlists = await PlaylistDatabase.instance.readAllPlaylists();
     final sessions = await PlaySessionDatabase.instance.readAllSessions();
 
+    final indexingState = await ref.read(indexingNotifierProvider.future);
+    final sortState = await ref.read(sortNotifierProvider.future);
+    final playerSettings = await ref.read(
+      playerSettingsNotifierProvider.future,
+    );
+    final eqState = await ref.read(equalizerNotifierProvider.future);
+
     final json = {
       'format': _kBackupFormat,
       'version': _kBackupVersion,
       'exportedAt': DateTime.now().toIso8601String(),
       'settings': {
-        'rootDirectory': config.rootDirectory,
-        'sortMusics': config.sortMusics.key,
-        'sortPlaylists': config.sortPlaylists.key,
-        'sortAlbums': config.sortAlbums.key,
-        'sortArtists': config.sortArtists.key,
-        'crossfadeDuration': config.crossfadeDuration,
-        'fadeOnPauseResume': config.fadeOnPauseResume,
+        'rootDirectory': indexingState.rootDirectory,
+        'sortMusics': sortState.musics.key,
+        'sortPlaylists': sortState.playlists.key,
+        'sortAlbums': sortState.albums.key,
+        'sortArtists': sortState.artists.key,
+        'crossfadeDuration': playerSettings.crossfadeDuration,
+        'fadeOnPauseResume': playerSettings.fadeOnPauseResume,
         'eq': {
-          'enabled': config.eqEnabled,
-          'preset': config.eqActivePreset.name,
-          'bandGains': config.eqBandGains,
+          'enabled': eqState.enabled,
+          'preset': eqState.activePreset.name,
+          'bandGains': eqState.bandGains,
         },
       },
       // Só exporta faixas com dado relevante (evita inflar o arquivo com
@@ -276,7 +293,7 @@ class BackupService {
 
   static Future<RestoreSummary> restore({
     required BackupData data,
-    required Configuration config,
+    required WidgetRef ref,
   }) async {
     var allTracks = await MusicDatabase.instance.readAllTracksIncludingHidden();
 
@@ -288,7 +305,7 @@ class BackupService {
       allTracks = await MusicDatabase.instance.readAllTracksIncludingHidden();
     }
 
-    await _restoreSettings(data.settings, config);
+    await _restoreSettings(data.settings, ref);
 
     // Rating e ocultas
     int metaMatched = 0, metaUnmatched = 0;
@@ -338,11 +355,11 @@ class BackupService {
           )).id!;
 
       final resolvedIds = <int>[];
-      for (final ref in backupPlaylist.tracks) {
+      for (final trackRef in backupPlaylist.tracks) {
         final match = _findMatch(
-          path: ref.path,
-          title: ref.title,
-          artist: ref.artist,
+          path: trackRef.path,
+          title: trackRef.title,
+          artist: trackRef.artist,
           tracks: allTracks,
         );
         if (match != null) resolvedIds.add(match.id!);
@@ -376,7 +393,7 @@ class BackupService {
     }
 
     // Recarrega para refletir ratings/hidden/faixas recriadas na UI.
-    await config.loadIndexedTracks();
+    await ref.read(indexingNotifierProvider.notifier).loadIndexedTracks();
 
     return RestoreSummary(
       playlistsRestored: playlistsRestored,
@@ -453,66 +470,81 @@ class BackupService {
 
   static Future<void> _restoreSettings(
     Map<String, dynamic> settings,
-    Configuration config,
+    WidgetRef ref,
   ) async {
     if (settings['rootDirectory'] != null) {
-      config.rootDirectory = settings['rootDirectory'] as String;
+      await ref
+          .read(indexingNotifierProvider.notifier)
+          .setRootDirectory(settings['rootDirectory'] as String);
     }
 
-    await config.setSortMusics(
+    final sortNotifier = ref.read(sortNotifierProvider.notifier);
+    final currentSort = await ref.read(sortNotifierProvider.future);
+
+    await sortNotifier.setSortMusics(
       SortOptionLabel.fromKey(
         settings['sortMusics'] as String? ?? '',
-        config.sortMusics,
+        currentSort.musics,
       ),
     );
-    await config.setSortPlaylists(
+    await sortNotifier.setSortPlaylists(
       SortOptionLabel.fromKey(
         settings['sortPlaylists'] as String? ?? '',
-        config.sortPlaylists,
+        currentSort.playlists,
       ),
     );
-    await config.setSortAlbums(
+    await sortNotifier.setSortAlbums(
       SortOptionLabel.fromKey(
         settings['sortAlbums'] as String? ?? '',
-        config.sortAlbums,
+        currentSort.albums,
       ),
     );
-    await config.setSortArtists(
+    await sortNotifier.setSortArtists(
       SortOptionLabel.fromKey(
         settings['sortArtists'] as String? ?? '',
-        config.sortArtists,
+        currentSort.artists,
       ),
     );
 
+    final playerSettingsNotifier = ref.read(
+      playerSettingsNotifierProvider.notifier,
+    );
     if (settings['crossfadeDuration'] != null) {
-      await config.setCrossfadeDuration(settings['crossfadeDuration'] as int);
+      await playerSettingsNotifier.setCrossfadeDuration(
+        settings['crossfadeDuration'] as int,
+      );
     }
     if (settings['fadeOnPauseResume'] != null) {
-      await config.setFadeOnPauseResume(settings['fadeOnPauseResume'] as bool);
+      await playerSettingsNotifier.setFadeOnPauseResume(
+        settings['fadeOnPauseResume'] as bool,
+      );
     }
 
     final eq = settings['eq'] as Map<String, dynamic>?;
     if (eq == null) return;
 
-    final enabled = eq['enabled'] as bool? ?? config.eqEnabled;
-    await config.setEqEnabled(enabled);
+    final eqNotifier = ref.read(equalizerNotifierProvider.notifier);
+    final currentEq = await ref.read(equalizerNotifierProvider.future);
+
+    final enabled = eq['enabled'] as bool? ?? currentEq.enabled;
+    await eqNotifier.setEnabled(enabled);
 
     final preset = EqualizerPreset.values.firstWhere(
       (p) => p.name == eq['preset'],
-      orElse: () => config.eqActivePreset,
+      orElse: () => currentEq.activePreset,
     );
 
     if (preset != EqualizerPreset.manual) {
-      await config.setEqPreset(preset);
+      await eqNotifier.setPreset(preset);
     } else {
       final gains = (eq['bandGains'] as List?)?.cast<num>();
       if (gains == null) return;
       for (
         int i = 0;
-        i < gains.length && i < config.eqBandDefinitions.length;
+        i < gains.length && i < EqualizerService.bands.length;
         i++
       ) {
-        await config.setEqBandGain(i, gains[i].toDouble());
+        await eqNotifier.setBandGain(i, gains[i].toDouble());
       }
     }
   }

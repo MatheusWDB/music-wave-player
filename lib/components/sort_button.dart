@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:music_wave_player/models/configuration.dart';
+import 'package:music_wave_player/services/sort_service.dart';
 
 /// Botão reutilizável que exibe as opções de ordenação disponíveis para uma aba.
 class SortButton extends StatelessWidget {

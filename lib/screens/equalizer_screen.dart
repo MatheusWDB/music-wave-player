@@ -1,11 +1,12 @@
 import 'package:flutter/material.dart';
-import 'package:music_wave_player/models/configuration.dart';
-import 'package:provider/provider.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:music_wave_player/providers/equalizer_notifier.dart';
+import 'package:music_wave_player/services/equalizer_service.dart';
 
-class EqualizerScreen extends StatelessWidget {
+class EqualizerScreen extends ConsumerWidget {
   const EqualizerScreen({super.key});
 
-  Future<void> _confirmReset(BuildContext context) async {
+  Future<void> _confirmReset(BuildContext context, WidgetRef ref) async {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
@@ -25,15 +26,19 @@ class EqualizerScreen extends StatelessWidget {
         ],
       ),
     );
-    if (confirmed == true && context.mounted) {
-      await context.read<Configuration>().resetEqualizer();
+    if (confirmed == true) {
+      await ref.read(equalizerNotifierProvider.notifier).reset();
     }
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final colorScheme = Theme.of(context).colorScheme;
-    final config = context.watch<Configuration>();
+    final eqState = ref.watch(equalizerNotifierProvider).valueOrNull;
+
+    if (eqState == null) {
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
 
     return Scaffold(
       appBar: AppBar(
@@ -42,7 +47,7 @@ class EqualizerScreen extends StatelessWidget {
           IconButton(
             icon: const Icon(Icons.restart_alt),
             tooltip: 'Restaurar',
-            onPressed: () => _confirmReset(context),
+            onPressed: () => _confirmReset(context, ref),
           ),
         ],
       ),
@@ -51,20 +56,21 @@ class EqualizerScreen extends StatelessWidget {
           children: [
             SwitchListTile(
               title: const Text('Equalizador ativado'),
-              value: config.eqEnabled,
-              onChanged: (v) => context.read<Configuration>().setEqEnabled(v),
+              value: eqState.enabled,
+              onChanged: (v) =>
+                  ref.read(equalizerNotifierProvider.notifier).setEnabled(v),
               activeColor: colorScheme.primary,
             ),
             const Divider(height: 1),
             const SizedBox(height: 8),
-            _PresetSelector(config: config),
+            _PresetSelector(activePreset: eqState.activePreset),
             const SizedBox(height: 16),
             Expanded(
               child: Opacity(
-                opacity: config.eqEnabled ? 1.0 : 0.4,
+                opacity: eqState.enabled ? 1.0 : 0.4,
                 child: IgnorePointer(
-                  ignoring: !config.eqEnabled,
-                  child: _BandsRow(config: config),
+                  ignoring: !eqState.enabled,
+                  child: _BandsRow(bandGains: eqState.bandGains),
                 ),
               ),
             ),
@@ -76,12 +82,12 @@ class EqualizerScreen extends StatelessWidget {
   }
 }
 
-class _PresetSelector extends StatelessWidget {
-  final Configuration config;
-  const _PresetSelector({required this.config});
+class _PresetSelector extends ConsumerWidget {
+  final EqualizerPreset activePreset;
+  const _PresetSelector({required this.activePreset});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final colorScheme = Theme.of(context).colorScheme;
 
     // "Manual" não aparece como opção selecionável — é um estado resultante
@@ -95,7 +101,7 @@ class _PresetSelector extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 16),
       child: Row(
         children: [
-          if (config.eqActivePreset == EqualizerPreset.manual)
+          if (activePreset == EqualizerPreset.manual)
             Padding(
               padding: const EdgeInsets.only(right: 8),
               child: Chip(
@@ -104,14 +110,15 @@ class _PresetSelector extends StatelessWidget {
               ),
             ),
           ...selectablePresets.map((preset) {
-            final isSelected = config.eqActivePreset == preset;
+            final isSelected = activePreset == preset;
             return Padding(
               padding: const EdgeInsets.only(right: 8),
               child: FilterChip(
                 label: Text(preset.label),
                 selected: isSelected,
-                onSelected: (_) =>
-                    context.read<Configuration>().setEqPreset(preset),
+                onSelected: (_) => ref
+                    .read(equalizerNotifierProvider.notifier)
+                    .setPreset(preset),
                 selectedColor: colorScheme.primaryContainer,
                 checkmarkColor: colorScheme.primary,
               ),
@@ -123,15 +130,14 @@ class _PresetSelector extends StatelessWidget {
   }
 }
 
-class _BandsRow extends StatelessWidget {
-  final Configuration config;
-  const _BandsRow({required this.config});
+class _BandsRow extends ConsumerWidget {
+  final List<double> bandGains;
+  const _BandsRow({required this.bandGains});
 
   @override
-  Widget build(BuildContext context) {
-    final bands = config.eqBandDefinitions;
-    final gains = config.eqBandGains;
-    final configReader = context.read<Configuration>();
+  Widget build(BuildContext context, WidgetRef ref) {
+    final bands = EqualizerService.bands;
+    final notifier = ref.read(equalizerNotifierProvider.notifier);
 
     return Row(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -139,14 +145,14 @@ class _BandsRow extends StatelessWidget {
         return Expanded(
           child: _BandSlider(
             label: bands[index].label,
-            gain: gains[index],
-            minGain: config.eqMinGain,
-            maxGain: config.eqMaxGain,
-            flatGain: config.eqFlatGain,
+            gain: bandGains[index],
+            minGain: EqualizerService.minGain,
+            maxGain: EqualizerService.maxGain,
+            flatGain: EqualizerService.flatGain,
             // Durante o arraste: só preview (memória + throttle no áudio).
-            onChanged: (v) => configReader.previewEqBandGain(index, v),
+            onChanged: (v) => notifier.previewBandGain(index, v),
             // Ao soltar: persiste e garante o valor final aplicado.
-            onChangeEnd: (v) => configReader.setEqBandGain(index, v),
+            onChangeEnd: (v) => notifier.setBandGain(index, v),
           ),
         );
       }),

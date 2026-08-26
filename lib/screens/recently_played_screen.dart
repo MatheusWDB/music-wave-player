@@ -1,26 +1,28 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:music_wave_player/components/cover_art_widget.dart';
-import 'package:music_wave_player/models/configuration.dart';
 import 'package:music_wave_player/models/music_track.dart';
+import 'package:music_wave_player/providers/current_track_provider.dart';
+import 'package:music_wave_player/providers/indexing_notifier.dart';
+import 'package:music_wave_player/providers/playback_notifier.dart';
 import 'package:music_wave_player/screens/full_player_screen.dart';
-import 'package:provider/provider.dart';
 
-class RecentlyPlayedScreen extends StatefulWidget {
+class RecentlyPlayedScreen extends ConsumerStatefulWidget {
   const RecentlyPlayedScreen({super.key});
 
   @override
-  State<RecentlyPlayedScreen> createState() => _RecentlyPlayedScreenState();
+  ConsumerState<RecentlyPlayedScreen> createState() =>
+      _RecentlyPlayedScreenState();
 }
 
-class _RecentlyPlayedScreenState extends State<RecentlyPlayedScreen> {
+class _RecentlyPlayedScreenState extends ConsumerState<RecentlyPlayedScreen> {
   static const _limitOptions = [10, 25, 50, 100];
   int _limit = 25;
 
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
-    final config = context.watch<Configuration>();
-    final allTracks = config.recentlyPlayedTracks;
+    final allTracks = ref.watch(recentlyPlayedTracksProvider);
     final tracks = allTracks.take(_limit).toList();
 
     return Scaffold(
@@ -63,7 +65,7 @@ class _RecentlyPlayedScreenState extends State<RecentlyPlayedScreen> {
             IconButton(
               icon: const Icon(Icons.delete_sweep_outlined),
               tooltip: 'Limpar histórico',
-              onPressed: () => _confirmClear(context, config),
+              onPressed: () => _confirmClear(context),
             ),
         ],
       ),
@@ -86,7 +88,7 @@ class _RecentlyPlayedScreenState extends State<RecentlyPlayedScreen> {
     );
   }
 
-  Future<void> _confirmClear(BuildContext context, Configuration config) async {
+  Future<void> _confirmClear(BuildContext context) async {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
@@ -107,20 +109,21 @@ class _RecentlyPlayedScreenState extends State<RecentlyPlayedScreen> {
         ],
       ),
     );
-    if (confirmed == true) await config.clearRecentlyPlayed();
+    if (confirmed == true) {
+      await ref.read(playbackNotifierProvider.notifier).clearRecentlyPlayed();
+    }
   }
 }
 
-class _TrackTile extends StatelessWidget {
+class _TrackTile extends ConsumerWidget {
   final MusicTrack track;
   final int position;
 
   const _TrackTile({required this.track, required this.position});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final colorScheme = Theme.of(context).colorScheme;
-    final config = context.read<Configuration>();
 
     return ListTile(
       leading: CoverArtWidget(
@@ -136,7 +139,16 @@ class _TrackTile extends StatelessWidget {
         style: TextStyle(color: colorScheme.onSurfaceVariant),
       ),
       onTap: () {
-        config.playTrack(track.id!);
+        final allTracks =
+            ref.read(indexingNotifierProvider).valueOrNull?.indexedTracks ??
+            const <MusicTrack>[];
+        ref
+            .read(playbackNotifierProvider.notifier)
+            .playTrack(
+              track.id!,
+              indexedTracks: allTracks,
+              trackPath: track.path,
+            );
         Navigator.push(
           context,
           MaterialPageRoute(

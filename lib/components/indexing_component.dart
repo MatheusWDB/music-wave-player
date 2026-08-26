@@ -1,23 +1,29 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
-import 'package:music_wave_player/models/configuration.dart';
 import 'package:music_wave_player/models/indexing_status_info.dart';
-import 'package:provider/provider.dart';
+import 'package:music_wave_player/providers/indexing_notifier.dart';
 
-class IndexingComponent extends StatelessWidget {
+class IndexingComponent extends ConsumerWidget {
   const IndexingComponent({super.key});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final ColorScheme colorScheme = Theme.of(context).colorScheme;
-    final Configuration config = context.watch<Configuration>();
-    final info = IndexingStatusInfo.from(config);
+    final indexingAsync = ref.watch(indexingNotifierProvider);
+    final state = indexingAsync.valueOrNull;
+
+    if (state == null) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    final info = IndexingStatusInfo.from(state);
 
     String? formattedDate;
-    if (config.lastScanDate != null) {
+    if (state.lastScanDate != null) {
       formattedDate = DateFormat(
         'dd/MM/yyyy HH:mm',
-      ).format(config.lastScanDate!);
+      ).format(state.lastScanDate!);
     }
 
     return Column(
@@ -47,7 +53,8 @@ class IndexingComponent extends StatelessWidget {
             ),
           ),
           onPressed: info.canScan
-              ? () => context.read<Configuration>().startIndexing()
+              ? () =>
+                    ref.read(indexingNotifierProvider.notifier).startIndexing()
               : null,
           icon: info.isBusy
               ? const SizedBox(

@@ -1,17 +1,17 @@
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:music_wave_player/components/indexing_component.dart';
 import 'package:music_wave_player/components/path_component.dart';
-import 'package:music_wave_player/models/configuration.dart';
+import 'package:music_wave_player/providers/indexing_notifier.dart';
 import 'package:permission_handler/permission_handler.dart';
-import 'package:provider/provider.dart';
 
 /// Card com os dois passos de configuração da biblioteca: seleção do
 /// diretório raiz (com pedido de permissão) e indexação.
-class DirectoryPickerCard extends StatelessWidget {
+class DirectoryPickerCard extends ConsumerWidget {
   const DirectoryPickerCard({super.key});
 
-  Future<void> _pickRootDirectory(BuildContext context) async {
+  Future<void> _pickRootDirectory(BuildContext context, WidgetRef ref) async {
     PermissionStatus status = await Permission.audio.request();
 
     if (!status.isGranted) {
@@ -44,12 +44,14 @@ class DirectoryPickerCard extends StatelessWidget {
     String? selectedDirectory = await FilePicker.platform.getDirectoryPath();
 
     if (selectedDirectory != null && context.mounted) {
-      context.read<Configuration>().rootDirectory = selectedDirectory;
+      await ref
+          .read(indexingNotifierProvider.notifier)
+          .setRootDirectory(selectedDirectory);
     }
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final colorScheme = Theme.of(context).colorScheme;
 
     return Card(
@@ -92,7 +94,7 @@ class DirectoryPickerCard extends StatelessWidget {
                   borderRadius: BorderRadius.circular(8.0),
                 ),
               ),
-              onPressed: () async => _pickRootDirectory(context),
+              onPressed: () async => _pickRootDirectory(context, ref),
               child: const Text(
                 "Escolher Pasta de Música",
                 style: TextStyle(fontSize: 16.0, fontWeight: FontWeight.bold),

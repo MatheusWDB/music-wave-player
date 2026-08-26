@@ -1,21 +1,24 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:music_wave_player/data/playlist_database.dart';
-import 'package:music_wave_player/models/configuration.dart';
+import 'package:music_wave_player/models/music_track.dart';
 import 'package:music_wave_player/models/playlist.dart';
+import 'package:music_wave_player/providers/indexing_notifier.dart';
+import 'package:music_wave_player/providers/playback_notifier.dart';
 import 'package:music_wave_player/screens/playlist_detail_screen.dart';
 import 'package:music_wave_player/services/favorites_service.dart';
-import 'package:provider/provider.dart';
+import 'package:music_wave_player/services/sort_service.dart';
 
-class PlaylistsTab extends StatefulWidget {
+class PlaylistsTab extends ConsumerStatefulWidget {
   final SortOption sortOption;
 
   const PlaylistsTab({super.key, required this.sortOption});
 
   @override
-  State<PlaylistsTab> createState() => _PlaylistsTabState();
+  ConsumerState<PlaylistsTab> createState() => _PlaylistsTabState();
 }
 
-class _PlaylistsTabState extends State<PlaylistsTab> {
+class _PlaylistsTabState extends ConsumerState<PlaylistsTab> {
   List<Playlist> _playlists = [];
   bool _loading = true;
 
@@ -114,6 +117,24 @@ class _PlaylistsTabState extends State<PlaylistsTab> {
     await _load();
   }
 
+  Future<void> _playPlaylist(Playlist playlist) async {
+    final indexedTracks =
+        ref.read(indexingNotifierProvider).valueOrNull?.indexedTracks ??
+        const <MusicTrack>[];
+    final isShuffleActive =
+        ref.read(playbackNotifierProvider).valueOrNull?.isShuffleActive ??
+        false;
+    await ref
+        .read(playbackNotifierProvider.notifier)
+        .playPlaylist(
+          playlist,
+          indexedTracks: indexedTracks,
+          shuffleActive: isShuffleActive,
+          pathForId: (id) =>
+              indexedTracks.where((t) => t.id == id).firstOrNull?.path,
+        );
+  }
+
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
@@ -189,7 +210,7 @@ class _PlaylistsTabState extends State<PlaylistsTab> {
                     trailing: PopupMenuButton<String>(
                       onSelected: (value) async {
                         if (value == 'play') {
-                          context.read<Configuration>().playPlaylist(playlist);
+                          await _playPlaylist(playlist);
                         } else if (value == 'delete') {
                           await _deletePlaylist(playlist);
                         }

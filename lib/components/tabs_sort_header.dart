@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:music_wave_player/components/sort_button.dart';
-import 'package:music_wave_player/models/configuration.dart';
+import 'package:music_wave_player/services/sort_service.dart';
 
 /// Cabeçalho de uma aba de listagem: título da aba à esquerda e botão de
 /// ordenação à direita.

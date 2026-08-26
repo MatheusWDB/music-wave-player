@@ -1,23 +1,23 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:music_wave_player/components/app_menu_sheet.dart';
 import 'package:music_wave_player/components/library_top_bar.dart';
 import 'package:music_wave_player/components/mini_player_component.dart';
 import 'package:music_wave_player/components/recap_widget.dart';
 import 'package:music_wave_player/components/tabs_component.dart';
-import 'package:music_wave_player/models/configuration.dart';
+import 'package:music_wave_player/providers/indexing_notifier.dart';
 import 'package:music_wave_player/screens/recently_played_screen.dart';
 import 'package:music_wave_player/screens/search_screen.dart';
 import 'package:music_wave_player/services/recap_service.dart';
-import 'package:provider/provider.dart';
 
-class LibraryScreen extends StatefulWidget {
+class LibraryScreen extends ConsumerStatefulWidget {
   const LibraryScreen({super.key});
 
   @override
-  State<LibraryScreen> createState() => _LibraryScreenState();
+  ConsumerState<LibraryScreen> createState() => _LibraryScreenState();
 }
 
-class _LibraryScreenState extends State<LibraryScreen> {
+class _LibraryScreenState extends ConsumerState<LibraryScreen> {
   @override
   void initState() {
     super.initState();
@@ -25,10 +25,12 @@ class _LibraryScreenState extends State<LibraryScreen> {
   }
 
   Future<void> _checkRecap() async {
-    final config = context.read<Configuration>();
-    if (config.indexedTracks.isEmpty) return;
+    final indexingState = await ref.read(indexingNotifierProvider.future);
+    if (indexingState.indexedTracks.isEmpty) return;
 
-    final recap = await RecapService.checkPendingRecap(config.indexedTracks);
+    final recap = await RecapService.checkPendingRecap(
+      indexingState.indexedTracks,
+    );
     if (recap != null && mounted) {
       await RecapWidget.show(context, recap);
     }

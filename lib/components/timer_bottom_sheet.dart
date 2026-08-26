@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:music_wave_player/components/timer_custom_duration_picker.dart';
 import 'package:music_wave_player/components/timer_preset_options.dart';
-import 'package:music_wave_player/services/timer_service.dart';
-import 'package:provider/provider.dart';
+import 'package:music_wave_player/providers/timer_notifier.dart';
 
-class TimerBottomSheet extends StatefulWidget {
+class TimerBottomSheet extends ConsumerStatefulWidget {
   const TimerBottomSheet._();
 
   static void show(BuildContext context) {
@@ -17,29 +17,29 @@ class TimerBottomSheet extends StatefulWidget {
   }
 
   @override
-  State<TimerBottomSheet> createState() => _TimerBottomSheetState();
+  ConsumerState<TimerBottomSheet> createState() => _TimerBottomSheetState();
 }
 
-class _TimerBottomSheetState extends State<TimerBottomSheet> {
+class _TimerBottomSheetState extends ConsumerState<TimerBottomSheet> {
   bool _showCustomPicker = false;
 
   void _startDuration(int seconds) {
-    context.read<SleepTimerService>().startDuration(seconds);
+    ref.read(timerNotifierProvider.notifier).startDuration(seconds);
     Navigator.pop(context);
   }
 
   void _startEndOfTrack() {
-    context.read<SleepTimerService>().startEndOfTrack();
+    ref.read(timerNotifierProvider.notifier).startEndOfTrack();
     Navigator.pop(context);
   }
 
   void _startEndOfQueue() {
-    context.read<SleepTimerService>().startEndOfQueue();
+    ref.read(timerNotifierProvider.notifier).startEndOfQueue();
     Navigator.pop(context);
   }
 
   void _cancel() {
-    context.read<SleepTimerService>().cancel();
+    ref.read(timerNotifierProvider.notifier).cancel();
     Navigator.pop(context);
   }
 
@@ -47,7 +47,7 @@ class _TimerBottomSheetState extends State<TimerBottomSheet> {
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     final bottomInset = MediaQuery.of(context).padding.bottom;
-    final timer = context.watch<SleepTimerService>();
+    final timer = ref.watch(timerNotifierProvider);
 
     return Material(
       color: colorScheme.surface,

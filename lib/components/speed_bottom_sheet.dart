@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:music_wave_player/components/speed_options_list.dart';
-import 'package:music_wave_player/models/configuration.dart';
-import 'package:provider/provider.dart';
+import 'package:music_wave_player/providers/player_settings_notifier.dart';
 
-class SpeedBottomSheet extends StatelessWidget {
+class SpeedBottomSheet extends ConsumerWidget {
   const SpeedBottomSheet._();
 
   static void show(BuildContext context) {
@@ -15,10 +15,14 @@ class SpeedBottomSheet extends StatelessWidget {
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final colorScheme = Theme.of(context).colorScheme;
     final bottomInset = MediaQuery.of(context).padding.bottom;
-    final config = context.watch<Configuration>();
+    final currentSpeed = ref.watch(
+      playerSettingsNotifierProvider.select(
+        (s) => s.valueOrNull?.playbackSpeed ?? 1.0,
+      ),
+    );
 
     return Material(
       color: colorScheme.surface,
@@ -56,9 +60,11 @@ class SpeedBottomSheet extends StatelessWidget {
               ),
               const SizedBox(height: 16),
               SpeedOptionsList(
-                currentSpeed: config.playbackSpeed,
+                currentSpeed: currentSpeed,
                 onSpeedSelected: (speed) {
-                  context.read<Configuration>().setPlaybackSpeed(speed);
+                  ref
+                      .read(playerSettingsNotifierProvider.notifier)
+                      .setPlaybackSpeed(speed);
                   Navigator.pop(context);
                 },
               ),

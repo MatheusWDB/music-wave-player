@@ -1,27 +1,28 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:music_wave_player/components/edit_track_bottom_sheet.dart';
 import 'package:music_wave_player/components/music_track_tile.dart';
 import 'package:music_wave_player/components/pick_playlist_dialog.dart';
 import 'package:music_wave_player/components/rating_bottom_sheet.dart';
 import 'package:music_wave_player/components/selection_action_bar.dart';
 import 'package:music_wave_player/data/playlist_database.dart';
-import 'package:music_wave_player/models/configuration.dart';
 import 'package:music_wave_player/models/music_track.dart';
+import 'package:music_wave_player/providers/indexing_notifier.dart';
+import 'package:music_wave_player/providers/queue_notifier.dart';
 import 'package:music_wave_player/screens/full_player_screen.dart';
 import 'package:music_wave_player/services/favorites_service.dart';
-import 'package:provider/provider.dart';
 
-class MusicsTab extends StatefulWidget {
+class MusicsTab extends ConsumerStatefulWidget {
   final List<MusicTrack> tracks;
   final Future<void> Function(int) onTrackTap;
 
   const MusicsTab({super.key, required this.tracks, required this.onTrackTap});
 
   @override
-  State<MusicsTab> createState() => _MusicsTabState();
+  ConsumerState<MusicsTab> createState() => _MusicsTabState();
 }
 
-class _MusicsTabState extends State<MusicsTab> {
+class _MusicsTabState extends ConsumerState<MusicsTab> {
   final Set<int> _selected = {};
   bool get _isSelecting => _selected.isNotEmpty;
 
@@ -91,7 +92,7 @@ class _MusicsTabState extends State<MusicsTab> {
   Future<void> _hideSelected() async {
     final ids = _selected.toList();
     _clearSelection();
-    await context.read<Configuration>().hideTracks(ids);
+    await ref.read(indexingNotifierProvider.notifier).hideTracks(ids);
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -116,7 +117,8 @@ class _MusicsTabState extends State<MusicsTab> {
 
   @override
   Widget build(BuildContext context) {
-    final config = context.read<Configuration>();
+    final queueNotifier = ref.read(queueNotifierProvider.notifier);
+    final indexingNotifier = ref.read(indexingNotifierProvider.notifier);
 
     return Stack(
       children: [
@@ -146,15 +148,15 @@ class _MusicsTabState extends State<MusicsTab> {
               onRate: () => RatingBottomSheet.show(context, track: track),
               onAddToPlaylist: () => _addTracksToPlaylist([track.id!]),
               onInsertNext: () {
-                config.insertAfterCurrent([track.id!]);
+                queueNotifier.insertAfterCurrent([track.id!]);
                 _showQueueSnack('Música adicionada após a atual');
               },
               onAddToEnd: () {
-                config.addToEndOfQueue([track.id!]);
+                queueNotifier.addToEnd([track.id!]);
                 _showQueueSnack('Música adicionada ao final da fila');
               },
               onHide: () async {
-                await config.hideTracks([track.id!]);
+                await indexingNotifier.hideTracks([track.id!]);
                 if (mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
                     const SnackBar(

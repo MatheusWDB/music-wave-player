@@ -1,16 +1,18 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:music_wave_player/components/current_queue_tile.dart';
 import 'package:music_wave_player/components/queue_header_bar.dart';
 import 'package:music_wave_player/components/queue_upcoming_list.dart';
 import 'package:music_wave_player/components/timer_active_banner.dart';
 import 'package:music_wave_player/components/timer_bottom_sheet.dart';
 import 'package:music_wave_player/data/playlist_database.dart';
-import 'package:music_wave_player/models/configuration.dart';
 import 'package:music_wave_player/models/music_track.dart';
-import 'package:music_wave_player/services/timer_service.dart';
-import 'package:provider/provider.dart';
+import 'package:music_wave_player/providers/indexing_notifier.dart';
+import 'package:music_wave_player/providers/playback_notifier.dart';
+import 'package:music_wave_player/providers/queue_notifier.dart';
+import 'package:music_wave_player/providers/timer_notifier.dart';
 
-class QueueBottomSheet extends StatefulWidget {
+class QueueBottomSheet extends ConsumerStatefulWidget {
   const QueueBottomSheet._();
 
   static void show(BuildContext context) {
@@ -23,10 +25,10 @@ class QueueBottomSheet extends StatefulWidget {
   }
 
   @override
-  State<QueueBottomSheet> createState() => _QueueBottomSheetState();
+  ConsumerState<QueueBottomSheet> createState() => _QueueBottomSheetState();
 }
 
-class _QueueBottomSheetState extends State<QueueBottomSheet> {
+class _QueueBottomSheetState extends ConsumerState<QueueBottomSheet> {
   final ScrollController _scrollController = ScrollController();
 
   @override
@@ -37,7 +39,7 @@ class _QueueBottomSheetState extends State<QueueBottomSheet> {
 
   Future<void> _saveQueueAsPlaylist(
     BuildContext context,
-    Configuration config,
+    List<int> playbackQueue,
   ) async {
     final controller = TextEditingController();
     final name = await showDialog<String>(
@@ -67,10 +69,7 @@ class _QueueBottomSheetState extends State<QueueBottomSheet> {
     final playlist = await PlaylistDatabase.instance.createPlaylist(
       resolvedName,
     );
-    await PlaylistDatabase.instance.addTracks(
-      playlist.id!,
-      config.playbackQueue.toList(),
-    );
+    await PlaylistDatabase.instance.addTracks(playlist.id!, playbackQueue);
 
     if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -95,7 +94,7 @@ class _QueueBottomSheetState extends State<QueueBottomSheet> {
 
   Future<void> _confirmClearQueue(
     BuildContext context,
-    Configuration config,
+    int? currentTrackId,
   ) async {
     final confirmed = await showDialog<bool>(
       context: context,
@@ -119,27 +118,29 @@ class _QueueBottomSheetState extends State<QueueBottomSheet> {
         ],
       ),
     );
-    if (confirmed == true) config.clearQueue();
+    if (confirmed == true) {
+      ref.read(queueNotifierProvider.notifier).clear(currentTrackId);
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     final bottomInset = MediaQuery.of(context).padding.bottom;
-    final config = context.watch<Configuration>();
-    final timer = context.watch<SleepTimerService>();
-    final fullQueue = config.playbackQueue;
-    final tracks = config.indexedTracks;
-    final currentIndex = config.currentQueueIndex;
-    final isPlaying = config.isPlaying;
 
-    MusicTrack? trackById(int id) {
-      try {
-        return tracks.firstWhere((t) => t.id == id);
-      } catch (_) {
-        return null;
-      }
-    }
+    final queueState = ref.watch(queueNotifierProvider);
+    final playbackState = ref.watch(playbackNotifierProvider).valueOrNull;
+    final indexedTracks =
+        ref.watch(indexingNotifierProvider).valueOrNull?.indexedTracks ??
+        const <MusicTrack>[];
+    final timer = ref.watch(timerNotifierProvider);
+
+    final fullQueue = queueState.playbackQueue;
+    final currentIndex = queueState.currentQueueIndex;
+    final isPlaying = playbackState?.isPlaying ?? false;
+
+    MusicTrack? trackById(int id) =>
+        indexedTracks.where((t) => t.id == id).firstOrNull;
 
     final currentTrack = currentIndex >= 0 && currentIndex < fullQueue.length
         ? trackById(fullQueue[currentIndex])
@@ -181,8 +182,9 @@ class _QueueBottomSheetState extends State<QueueBottomSheet> {
 
             QueueHeaderBar(
               hasUpcomingTracks: upcomingTracks.isNotEmpty,
-              onSaveAsPlaylist: () => _saveQueueAsPlaylist(context, config),
-              onClearQueue: () => _confirmClearQueue(context, config),
+              onSaveAsPlaylist: () => _saveQueueAsPlaylist(context, fullQueue),
+              onClearQueue: () =>
+                  _confirmClearQueue(context, playbackState?.lastPlayedMusicId),
               onClose: () => Navigator.pop(context),
             ),
 
@@ -198,7 +200,12 @@ class _QueueBottomSheetState extends State<QueueBottomSheet> {
               CurrentQueueTile(
                 track: currentTrack,
                 isPlaying: isPlaying,
-                onPlayPause: config.togglePlayPause,
+                onPlayPause: () => ref
+                    .read(playbackNotifierProvider.notifier)
+                    .togglePlayPause(
+                      indexedTracks: indexedTracks,
+                      currentTrackPath: currentTrack.path,
+                    ),
               ),
 
             if (upcomingTracks.isNotEmpty) const Divider(height: 1),
@@ -210,15 +217,27 @@ class _QueueBottomSheetState extends State<QueueBottomSheet> {
                 scrollController: _scrollController,
                 bottomPadding: bottomInset,
                 onReorder: (oldIndex, newIndex) {
-                  config.reorderQueue(
-                    realIndexOf(oldIndex),
-                    realIndexOf(newIndex),
-                  );
+                  ref
+                      .read(queueNotifierProvider.notifier)
+                      .reorder(
+                        realIndexOf(oldIndex),
+                        realIndexOf(newIndex),
+                        playbackState?.lastPlayedMusicId,
+                      );
                 },
-                onDismiss: (index) =>
-                    config.removeFromQueue(realIndexOf(index)),
+                onDismiss: (index) => ref
+                    .read(playbackNotifierProvider.notifier)
+                    .removeFromQueue(
+                      realIndexOf(index),
+                      indexedTracks: indexedTracks,
+                    ),
                 onTap: (index) {
-                  config.jumpToQueueIndex(realIndexOf(index));
+                  ref
+                      .read(playbackNotifierProvider.notifier)
+                      .jumpToQueueIndex(
+                        realIndexOf(index),
+                        indexedTracks: indexedTracks,
+                      );
                   Navigator.pop(context);
                 },
               ),

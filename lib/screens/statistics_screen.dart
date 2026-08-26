@@ -1,20 +1,20 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:music_wave_player/components/listening_stats_section.dart';
 import 'package:music_wave_player/components/period_filter_bar.dart';
 import 'package:music_wave_player/components/stat_rank_tile.dart';
 import 'package:music_wave_player/data/play_session_database.dart';
-import 'package:music_wave_player/models/configuration.dart';
 import 'package:music_wave_player/models/music_track.dart';
-import 'package:provider/provider.dart';
+import 'package:music_wave_player/providers/indexing_notifier.dart';
 
-class StatisticsScreen extends StatefulWidget {
+class StatisticsScreen extends ConsumerStatefulWidget {
   const StatisticsScreen({super.key});
 
   @override
-  State<StatisticsScreen> createState() => _StatisticsScreenState();
+  ConsumerState<StatisticsScreen> createState() => _StatisticsScreenState();
 }
 
-class _StatisticsScreenState extends State<StatisticsScreen>
+class _StatisticsScreenState extends ConsumerState<StatisticsScreen>
     with SingleTickerProviderStateMixin {
   late final TabController _tabController;
   StatsPeriod _selectedPeriod = StatsPeriod.lastMonth;
@@ -130,7 +130,9 @@ class _StatisticsScreenState extends State<StatisticsScreen>
 
   @override
   Widget build(BuildContext context) {
-    final tracks = context.read<Configuration>().indexedTracks;
+    final tracks =
+        ref.watch(indexingNotifierProvider).valueOrNull?.indexedTracks ??
+        const <MusicTrack>[];
 
     return Scaffold(
       appBar: AppBar(

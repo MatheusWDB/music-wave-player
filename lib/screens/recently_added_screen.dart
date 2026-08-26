@@ -1,11 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:music_wave_player/components/cover_art_widget.dart';
-import 'package:music_wave_player/models/configuration.dart';
 import 'package:music_wave_player/models/music_track.dart';
+import 'package:music_wave_player/providers/indexing_notifier.dart';
+import 'package:music_wave_player/providers/playback_notifier.dart';
 import 'package:music_wave_player/screens/full_player_screen.dart';
-import 'package:provider/provider.dart';
 
-class RecentlyAddedScreen extends StatelessWidget {
+class RecentlyAddedScreen extends ConsumerWidget {
   const RecentlyAddedScreen({super.key});
 
   List<MusicTrack> _sorted(List<MusicTrack> tracks) {
@@ -35,10 +36,12 @@ class RecentlyAddedScreen extends StatelessWidget {
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final colorScheme = Theme.of(context).colorScheme;
-    final config = context.watch<Configuration>();
-    final tracks = _sorted(config.indexedTracks);
+    final allTracks =
+        ref.watch(indexingNotifierProvider).valueOrNull?.indexedTracks ??
+        const <MusicTrack>[];
+    final tracks = _sorted(allTracks);
 
     return Scaffold(
       appBar: AppBar(title: const Text('Adicionadas recentemente')),
@@ -80,7 +83,13 @@ class RecentlyAddedScreen extends StatelessWidget {
                     ),
                   ),
                   onTap: () {
-                    config.playTrack(track.id!);
+                    ref
+                        .read(playbackNotifierProvider.notifier)
+                        .playTrack(
+                          track.id!,
+                          indexedTracks: allTracks,
+                          trackPath: track.path,
+                        );
                     Navigator.push(
                       context,
                       MaterialPageRoute(

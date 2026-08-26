@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:music_wave_player/components/pick_playlist_dialog.dart';
 import 'package:music_wave_player/data/playlist_database.dart';
-import 'package:music_wave_player/models/configuration.dart';
 import 'package:music_wave_player/models/music_track.dart';
-import 'package:provider/provider.dart';
+import 'package:music_wave_player/providers/indexing_notifier.dart';
 
-class EditTrackBottomSheet extends StatefulWidget {
+class EditTrackBottomSheet extends ConsumerStatefulWidget {
   final MusicTrack track;
 
   const EditTrackBottomSheet._({required this.track});
@@ -24,10 +24,11 @@ class EditTrackBottomSheet extends StatefulWidget {
   }
 
   @override
-  State<EditTrackBottomSheet> createState() => _EditTrackBottomSheetState();
+  ConsumerState<EditTrackBottomSheet> createState() =>
+      _EditTrackBottomSheetState();
 }
 
-class _EditTrackBottomSheetState extends State<EditTrackBottomSheet> {
+class _EditTrackBottomSheetState extends ConsumerState<EditTrackBottomSheet> {
   final _formKey = GlobalKey<FormState>();
   late final TextEditingController _titleCtrl;
   late final TextEditingController _artistCtrl;
@@ -50,21 +51,43 @@ class _EditTrackBottomSheetState extends State<EditTrackBottomSheet> {
     super.dispose();
   }
 
+  void _showSnack(String message, {bool isSuccess = false}) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: isSuccess
+            ? Theme.of(context).colorScheme.primary
+            : Theme.of(context).colorScheme.error,
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
+
   Future<void> _save() async {
     if (!_formKey.currentState!.validate()) return;
     if (_isSaving) return;
     setState(() => _isSaving = true);
-    final config = context.read<Configuration>();
-    final success = await config.editTrack(
-      track: widget.track,
-      newTitle: _titleCtrl.text.trim(),
-      newArtist: _artistCtrl.text.trim(),
-      newAlbum: _albumCtrl.text.trim(),
-      context: context,
-    );
+
+    final result = await ref
+        .read(indexingNotifierProvider.notifier)
+        .editTrack(
+          track: widget.track,
+          newTitle: _titleCtrl.text.trim(),
+          newArtist: _artistCtrl.text.trim(),
+          newAlbum: _albumCtrl.text.trim(),
+        );
+
     if (!mounted) return;
     setState(() => _isSaving = false);
-    if (success) Navigator.of(context).pop(true);
+
+    switch (result) {
+      case TrackEditSuccess():
+        _showSnack('Informações salvas com sucesso!', isSuccess: true);
+        Navigator.of(context).pop(true);
+      case TrackEditFailure(:final reason):
+        _showSnack(reason);
+    }
   }
 
   Future<void> _addToPlaylist() async {
@@ -78,15 +101,7 @@ class _EditTrackBottomSheetState extends State<EditTrackBottomSheet> {
     if (playlistId == null) return;
 
     await PlaylistDatabase.instance.addTracks(playlistId, [widget.track.id!]);
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: const Text('Música adicionada à playlist!'),
-          behavior: SnackBarBehavior.floating,
-          backgroundColor: Theme.of(context).colorScheme.primary,
-        ),
-      );
-    }
+    _showSnack('Música adicionada à playlist!', isSuccess: true);
   }
 
   @override

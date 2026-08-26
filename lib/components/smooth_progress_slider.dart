@@ -1,12 +1,12 @@
 import 'package:flutter/material.dart';
-import 'package:music_wave_player/models/configuration.dart';
-import 'package:provider/provider.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:music_wave_player/providers/playback_notifier.dart';
 
 /// Slider de progresso de reprodução com interpolação suave entre
 /// atualizações de posição (que chegam a cada poucos frames do player,
 /// não a 60fps) — usa um [AnimationController] como ticker para
 /// avançar visualmente a posição entre atualizações reais.
-class SmoothProgressSlider extends StatefulWidget {
+class SmoothProgressSlider extends ConsumerStatefulWidget {
   final double? draggingValue;
   final ValueChanged<double> onDragStart;
   final ValueChanged<double> onDragUpdate;
@@ -21,10 +21,11 @@ class SmoothProgressSlider extends StatefulWidget {
   });
 
   @override
-  State<SmoothProgressSlider> createState() => _SmoothProgressSliderState();
+  ConsumerState<SmoothProgressSlider> createState() =>
+      _SmoothProgressSliderState();
 }
 
-class _SmoothProgressSliderState extends State<SmoothProgressSlider>
+class _SmoothProgressSliderState extends ConsumerState<SmoothProgressSlider>
     with SingleTickerProviderStateMixin {
   late AnimationController _ticker;
   double _smoothPosition = 0.0;
@@ -48,14 +49,15 @@ class _SmoothProgressSliderState extends State<SmoothProgressSlider>
 
   void _onTick() {
     if (!mounted) return;
-    final config = context.read<Configuration>();
-    if (widget.draggingValue != null || !config.isPlaying) return;
+    final playback = ref.read(playbackNotifierProvider).valueOrNull;
+    if (playback == null) return;
+    if (widget.draggingValue != null || !playback.isPlaying) return;
     final now = DateTime.now();
     final elapsed = _lastTickTime != null
         ? now.difference(_lastTickTime!).inMilliseconds
         : 16;
     _lastTickTime = now;
-    final realPosition = config.currentPositionMs.toDouble();
+    final realPosition = playback.currentPositionMs.toDouble();
     final diff = (realPosition - _smoothPosition).abs();
     if (diff > 1500) {
       _smoothPosition = realPosition;
@@ -69,20 +71,25 @@ class _SmoothProgressSliderState extends State<SmoothProgressSlider>
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    _smoothPosition = context
-        .read<Configuration>()
-        .currentPositionMs
-        .toDouble();
+    _smoothPosition =
+        (ref.read(playbackNotifierProvider).valueOrNull?.currentPositionMs ?? 0)
+            .toDouble();
   }
 
   @override
   Widget build(BuildContext context) {
-    final isPlaying = context.select<Configuration, bool>((c) => c.isPlaying);
-    final positionMs = context.select<Configuration, int>(
-      (c) => c.currentPositionMs,
+    final isPlaying = ref.watch(
+      playbackNotifierProvider.select((s) => s.valueOrNull?.isPlaying ?? false),
     );
-    final durationMs = context.select<Configuration, int>(
-      (c) => c.trackDurationMs,
+    final positionMs = ref.watch(
+      playbackNotifierProvider.select(
+        (s) => s.valueOrNull?.currentPositionMs ?? 0,
+      ),
+    );
+    final durationMs = ref.watch(
+      playbackNotifierProvider.select(
+        (s) => s.valueOrNull?.trackDurationMs ?? 0,
+      ),
     );
     final colorScheme = Theme.of(context).colorScheme;
 

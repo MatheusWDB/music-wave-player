@@ -1,23 +1,24 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:music_wave_player/components/listening_stats_section.dart';
 import 'package:music_wave_player/components/period_filter_bar.dart';
 import 'package:music_wave_player/components/ranked_track_tile.dart';
 import 'package:music_wave_player/data/play_session_database.dart';
-import 'package:music_wave_player/models/configuration.dart';
 import 'package:music_wave_player/models/music_track.dart';
+import 'package:music_wave_player/providers/indexing_notifier.dart';
+import 'package:music_wave_player/providers/playback_notifier.dart';
 import 'package:music_wave_player/screens/full_player_screen.dart';
-import 'package:provider/provider.dart';
 
 enum _SortOrder { mostPlayed, leastPlayed }
 
-class MostPlayedScreen extends StatefulWidget {
+class MostPlayedScreen extends ConsumerStatefulWidget {
   const MostPlayedScreen({super.key});
 
   @override
-  State<MostPlayedScreen> createState() => _MostPlayedScreenState();
+  ConsumerState<MostPlayedScreen> createState() => _MostPlayedScreenState();
 }
 
-class _MostPlayedScreenState extends State<MostPlayedScreen> {
+class _MostPlayedScreenState extends ConsumerState<MostPlayedScreen> {
   StatsPeriod _selectedPeriod = StatsPeriod.lastMonth;
   int? _selectedYear;
   List<int> _availableYears = [];
@@ -103,14 +104,12 @@ class _MostPlayedScreenState extends State<MostPlayedScreen> {
     }
 
     if (_sortOrder == _SortOrder.mostPlayed) {
-      // Mais ouvidas: ouvidas DESC, nunca ouvidas por duração DESC
       played.sort((a, b) => b.seconds.compareTo(a.seconds));
       neverPlayed.sort(
         (a, b) => b.track.durationMs.compareTo(a.track.durationMs),
       );
       return [...played, ...neverPlayed];
     } else {
-      // Menos ouvidas: nunca ouvidas por duração ASC, ouvidas ASC
       played.sort((a, b) => a.seconds.compareTo(b.seconds));
       neverPlayed.sort(
         (a, b) => a.track.durationMs.compareTo(b.track.durationMs),
@@ -119,8 +118,10 @@ class _MostPlayedScreenState extends State<MostPlayedScreen> {
     }
   }
 
-  void _openTrack(MusicTrack track) {
-    context.read<Configuration>().playTrack(track.id!);
+  void _openTrack(MusicTrack track, List<MusicTrack> allTracks) {
+    ref
+        .read(playbackNotifierProvider.notifier)
+        .playTrack(track.id!, indexedTracks: allTracks, trackPath: track.path);
     Navigator.push(
       context,
       MaterialPageRoute(
@@ -132,7 +133,9 @@ class _MostPlayedScreenState extends State<MostPlayedScreen> {
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
-    final tracks = context.read<Configuration>().indexedTracks;
+    final tracks =
+        ref.watch(indexingNotifierProvider).valueOrNull?.indexedTracks ??
+        const <MusicTrack>[];
     final stats = _buildStats(tracks);
 
     return Scaffold(
@@ -237,7 +240,7 @@ class _MostPlayedScreenState extends State<MostPlayedScreen> {
                         artist: stat.track.artist.split(';').first.trim(),
                         seconds: stat.seconds,
                         durationMs: stat.track.durationMs,
-                        onTap: () => _openTrack(stat.track),
+                        onTap: () => _openTrack(stat.track, tracks),
                       );
                     },
                   ),

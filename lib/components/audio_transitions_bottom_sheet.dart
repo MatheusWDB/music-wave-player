@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:music_wave_player/components/crossfade_options_section.dart';
 import 'package:music_wave_player/components/fade_on_pause_resume_section.dart';
-import 'package:music_wave_player/models/configuration.dart';
-import 'package:provider/provider.dart';
+import 'package:music_wave_player/providers/player_settings_notifier.dart';
 
-class AudioTransitionsBottomSheet extends StatelessWidget {
+class AudioTransitionsBottomSheet extends ConsumerWidget {
   const AudioTransitionsBottomSheet._();
 
   static void show(BuildContext context) {
@@ -17,10 +17,17 @@ class AudioTransitionsBottomSheet extends StatelessWidget {
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final colorScheme = Theme.of(context).colorScheme;
     final bottomInset = MediaQuery.of(context).padding.bottom;
-    final config = context.watch<Configuration>();
+    final settings = ref.watch(playerSettingsNotifierProvider).valueOrNull;
+
+    if (settings == null) {
+      return const SizedBox(
+        height: 200,
+        child: Center(child: CircularProgressIndicator()),
+      );
+    }
 
     return Material(
       color: colorScheme.surface,
@@ -62,17 +69,19 @@ class AudioTransitionsBottomSheet extends StatelessWidget {
               const SizedBox(height: 24),
 
               CrossfadeOptionsSection(
-                selectedDuration: config.crossfadeDuration,
-                onDurationSelected: (value) =>
-                    context.read<Configuration>().setCrossfadeDuration(value),
+                selectedDuration: settings.crossfadeDuration,
+                onDurationSelected: (value) => ref
+                    .read(playerSettingsNotifierProvider.notifier)
+                    .setCrossfadeDuration(value),
               ),
 
               const Divider(height: 32),
 
               FadeOnPauseResumeSection(
-                enabled: config.fadeOnPauseResume,
-                onChanged: (v) =>
-                    context.read<Configuration>().setFadeOnPauseResume(v),
+                enabled: settings.fadeOnPauseResume,
+                onChanged: (v) => ref
+                    .read(playerSettingsNotifierProvider.notifier)
+                    .setFadeOnPauseResume(v),
               ),
             ],
           ),

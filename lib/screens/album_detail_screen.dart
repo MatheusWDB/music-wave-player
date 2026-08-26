@@ -1,14 +1,16 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:music_wave_player/components/cover_art_widget.dart';
 import 'package:music_wave_player/components/listening_stats_section.dart';
 import 'package:music_wave_player/components/rating_bottom_sheet.dart';
 import 'package:music_wave_player/data/play_session_database.dart';
-import 'package:music_wave_player/models/configuration.dart';
 import 'package:music_wave_player/models/music_track.dart';
+import 'package:music_wave_player/providers/indexing_notifier.dart';
+import 'package:music_wave_player/providers/playback_notifier.dart';
+import 'package:music_wave_player/providers/queue_notifier.dart';
 import 'package:music_wave_player/screens/full_player_screen.dart';
-import 'package:provider/provider.dart';
 
-class AlbumDetailScreen extends StatefulWidget {
+class AlbumDetailScreen extends ConsumerStatefulWidget {
   final String album;
   final List<MusicTrack> tracks;
 
@@ -19,10 +21,10 @@ class AlbumDetailScreen extends StatefulWidget {
   });
 
   @override
-  State<AlbumDetailScreen> createState() => _AlbumDetailScreenState();
+  ConsumerState<AlbumDetailScreen> createState() => _AlbumDetailScreenState();
 }
 
-class _AlbumDetailScreenState extends State<AlbumDetailScreen> {
+class _AlbumDetailScreenState extends ConsumerState<AlbumDetailScreen> {
   late List<MusicTrack> _tracks;
 
   // Estatísticas
@@ -106,7 +108,7 @@ class _AlbumDetailScreenState extends State<AlbumDetailScreen> {
   }
 
   Future<void> _hideTrack(MusicTrack track) async {
-    await context.read<Configuration>().hideTracks([track.id!]);
+    await ref.read(indexingNotifierProvider.notifier).hideTracks([track.id!]);
     setState(() => _tracks.removeWhere((t) => t.id == track.id));
     _showSnack('Música ocultada.');
   }
@@ -127,12 +129,18 @@ class _AlbumDetailScreenState extends State<AlbumDetailScreen> {
     _loadStats();
   }
 
+  String? _pathForId(int id) {
+    final allTracks =
+        ref.read(indexingNotifierProvider).valueOrNull?.indexedTracks ??
+        const <MusicTrack>[];
+    return allTracks.where((t) => t.id == id).firstOrNull?.path;
+  }
+
   // ── Build ─────────────────────────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
-    final config = context.read<Configuration>();
     final ids = _tracks.map((t) => t.id!).toList();
     final coverPath = _tracks
         .firstWhere((t) => t.coverPath != null, orElse: () => _tracks.first)
@@ -146,10 +154,12 @@ class _AlbumDetailScreenState extends State<AlbumDetailScreen> {
           PopupMenuButton<String>(
             onSelected: (value) {
               if (value == 'insert_next') {
-                config.insertAfterCurrent(ids);
+                ref
+                    .read(queueNotifierProvider.notifier)
+                    .insertAfterCurrent(ids);
                 _showSnack('Músicas adicionadas após a atual');
               } else if (value == 'add_end') {
-                config.addToEndOfQueue(ids);
+                ref.read(queueNotifierProvider.notifier).addToEnd(ids);
                 _showSnack('Músicas adicionadas ao final da fila');
               }
             },
@@ -223,7 +233,19 @@ class _AlbumDetailScreenState extends State<AlbumDetailScreen> {
                 if (_tracks.isNotEmpty)
                   FilledButton.icon(
                     onPressed: () {
-                      config.playTracks(_tracks);
+                      final isShuffleActive =
+                          ref
+                              .read(playbackNotifierProvider)
+                              .valueOrNull
+                              ?.isShuffleActive ??
+                          false;
+                      ref
+                          .read(playbackNotifierProvider.notifier)
+                          .playTracks(
+                            _tracks,
+                            shuffleActive: isShuffleActive,
+                            pathForId: _pathForId,
+                          );
                       Navigator.pop(context);
                     },
                     icon: const Icon(Icons.play_arrow),
@@ -298,10 +320,14 @@ class _AlbumDetailScreenState extends State<AlbumDetailScreen> {
                               icon: const Icon(Icons.more_vert),
                               onSelected: (value) async {
                                 if (value == 'insert_next') {
-                                  config.insertAfterCurrent([track.id!]);
+                                  ref
+                                      .read(queueNotifierProvider.notifier)
+                                      .insertAfterCurrent([track.id!]);
                                   _showSnack('Música adicionada após a atual');
                                 } else if (value == 'add_end') {
-                                  config.addToEndOfQueue([track.id!]);
+                                  ref
+                                      .read(queueNotifierProvider.notifier)
+                                      .addToEnd([track.id!]);
                                   _showSnack(
                                     'Música adicionada ao final da fila',
                                   );
@@ -360,7 +386,19 @@ class _AlbumDetailScreenState extends State<AlbumDetailScreen> {
                           ],
                         ),
                         onTap: () {
-                          config.playTrack(track.id!);
+                          final allTracks =
+                              ref
+                                  .read(indexingNotifierProvider)
+                                  .valueOrNull
+                                  ?.indexedTracks ??
+                              const <MusicTrack>[];
+                          ref
+                              .read(playbackNotifierProvider.notifier)
+                              .playTrack(
+                                track.id!,
+                                indexedTracks: allTracks,
+                                trackPath: track.path,
+                              );
                           Navigator.push(
                             context,
                             MaterialPageRoute(

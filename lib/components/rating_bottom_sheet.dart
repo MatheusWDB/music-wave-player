@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:music_wave_player/components/star_rating_widget.dart';
-import 'package:music_wave_player/models/configuration.dart';
 import 'package:music_wave_player/models/music_track.dart';
-import 'package:provider/provider.dart';
+import 'package:music_wave_player/providers/indexing_notifier.dart';
 
-class RatingBottomSheet extends StatefulWidget {
+class RatingBottomSheet extends ConsumerStatefulWidget {
   final MusicTrack track;
 
   const RatingBottomSheet._({required this.track});
@@ -18,26 +18,11 @@ class RatingBottomSheet extends StatefulWidget {
   }
 
   @override
-  State<RatingBottomSheet> createState() => _RatingBottomSheetState();
+  ConsumerState<RatingBottomSheet> createState() => _RatingBottomSheetState();
 }
 
-class _RatingBottomSheetState extends State<RatingBottomSheet> {
+class _RatingBottomSheetState extends ConsumerState<RatingBottomSheet> {
   late double _rating;
-
-  // Labels ocultos — preparados para uso futuro
-  static final _labels = {
-    0.0: 'Sem nota',
-    0.5: 'Horrível',
-    1.0: 'Ruim',
-    1.5: 'Abaixo do ok',
-    2.0: 'Ok',
-    2.5: 'Razoável',
-    3.0: 'Boa',
-    3.5: 'Muito boa',
-    4.0: 'Ótima',
-    4.5: 'Excelente',
-    5.0: 'Perfeita',
-  };
 
   @override
   void initState() {
@@ -46,7 +31,9 @@ class _RatingBottomSheetState extends State<RatingBottomSheet> {
   }
 
   Future<void> _save() async {
-    await context.read<Configuration>().setRating(widget.track.id!, _rating);
+    await ref
+        .read(indexingNotifierProvider.notifier)
+        .setRating(widget.track.id!, _rating);
     if (mounted) Navigator.pop(context);
   }
 
