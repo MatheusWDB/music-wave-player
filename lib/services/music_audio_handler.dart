@@ -256,6 +256,15 @@ class MusicAudioHandler {
     // mesmo sem a faixa ter de fato chegado ao fim. Sem essa checagem,
     // isso causava avanço espúrio de faixa em loop — mais perceptível em
     // faixas curtas, onde a margem entre "carregada" e "fim" é pequena.
+    //
+    // Margem de 3000ms (era 800ms): dispositivos Bluetooth introduzem
+    // latência extra na leitura de posição, fazendo a folga real no fim da
+    // faixa passar de 800ms e o evento ser descartado como espúrio —
+    // causava pausa incorreta ao fim da faixa e reset ao retomar (bug
+    // investigado e confirmado por log: folgas observadas de 600-870ms
+    // com fone Bluetooth conectado). O filtro contra o "completed"
+    // residual pós-open() continua válido: nesse caso a diferença entre
+    // posição e duração é da ordem de segundos inteiros, não milissegundos.
     _completedSub = player.stream.completed.listen((completed) {
       if (!completed) return;
 
@@ -263,7 +272,7 @@ class MusicAudioHandler {
       final position = player.state.position;
       final isNearEnd =
           duration > Duration.zero &&
-          (duration - position).inMilliseconds <= 800;
+          (duration - position).inMilliseconds <= 3000;
       if (!isNearEnd) return;
 
       final shouldPause = _ref
@@ -287,6 +296,12 @@ class MusicAudioHandler {
           skipToPrevious();
         case MediaSessionCommandSeekTo(:final position):
           seek(position);
+        case MediaSessionCommandPause():
+          // O mpv_audio_kit já auto-aplica pause() no player nativo antes
+          // de emitir este evento — nada a fazer aqui além de deixar o
+          // caso explícito (evita cair no default silenciosamente e
+          // documenta que já foi considerado).
+          break;
         case MediaSessionCommandPlay():
         case MediaSessionCommandPlayPause():
           // O mpv_audio_kit auto-aplica play()/pause() no player nativo
