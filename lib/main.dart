@@ -2,13 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:music_wave_player/screens/library_screen.dart';
+import 'package:music_wave_player/theme/app_colors.dart';
+import 'package:music_wave_player/theme/app_theme.dart';
 import 'package:permission_handler/permission_handler.dart';
-
-const Color colorBgDark = Color(0xFF0D1B2A);
-const Color colorSurface = Color(0xFF1D3557);
-const Color colorHighlight = Color(0xFF457B9D);
-const Color colorAccent = Color(0xFFA8DADC);
-const Color colorAction = Color(0xFFE63946);
 
 /// Chave global do ScaffoldMessenger — permite mostrar feedback (SnackBar)
 /// para operações assíncronas de longa duração (ex: restauração de backup)
@@ -26,7 +22,7 @@ class AppMessenger {
       SnackBar(
         content: Text(message),
         behavior: SnackBarBehavior.floating,
-        backgroundColor: isError ? colorAction : colorHighlight,
+        backgroundColor: isError ? AppColors.error : AppColors.surfaceElevated,
       ),
     );
   }
@@ -62,25 +58,7 @@ class MyApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       title: 'MusicWave Player',
       scaffoldMessengerKey: rootMessengerKey,
-      theme: ThemeData(
-        brightness: Brightness.dark,
-        colorScheme: const ColorScheme(
-          brightness: Brightness.dark,
-          primary: colorHighlight,
-          onPrimary: colorSurface,
-          secondary: colorAccent,
-          onSecondary: colorSurface,
-          surface: colorSurface,
-          onSurface: colorAccent,
-          error: colorAction,
-          onError: Colors.white,
-        ),
-        scaffoldBackgroundColor: colorBgDark,
-        appBarTheme: const AppBarTheme(
-          backgroundColor: colorSurface,
-          foregroundColor: colorAccent,
-        ),
-      ),
+      theme: AppTheme.wave,
       home: const LibraryScreen(),
     );
   }

@@ -222,12 +222,12 @@ class _EditTrackBottomSheetState extends ConsumerState<EditTrackBottomSheet> {
                       ),
                     ),
                     child: _isSaving
-                        ? const SizedBox(
+                        ? SizedBox(
                             width: 20,
                             height: 20,
                             child: CircularProgressIndicator(
                               strokeWidth: 2.5,
-                              color: Colors.white,
+                              color: colorScheme.onPrimary,
                             ),
                           )
                         : const Text('Salvar'),

@@ -25,17 +25,20 @@ class MiniPlayerControls extends StatelessWidget {
       children: [
         IconButton(
           onPressed: onPrevious,
-          icon: Icon(Icons.skip_previous, color: colorScheme.primary),
+          icon: Icon(Icons.skip_previous, color: colorScheme.onSurface),
           iconSize: 28.0,
         ),
         IconButton(
           onPressed: onPlayPause,
-          icon: Icon(isPlaying ? Icons.pause : Icons.play_arrow),
+          icon: Icon(
+            isPlaying ? Icons.pause : Icons.play_arrow,
+            color: colorScheme.onSurface,
+          ),
           iconSize: 32.0,
         ),
         IconButton(
           onPressed: onNext,
-          icon: Icon(Icons.skip_next, color: colorScheme.primary),
+          icon: Icon(Icons.skip_next, color: colorScheme.onSurface),
           iconSize: 28.0,
         ),
       ],

@@ -85,6 +85,7 @@ class PlaybackNotifier extends _$PlaybackNotifier {
     required List<MusicTrack> indexedTracks,
     required String? trackPath,
     bool regenerateQueue = true,
+    bool autoplay = true,
   }) async {
     final current = state.valueOrNull;
     if (current == null) return;
@@ -126,13 +127,17 @@ class PlaybackNotifier extends _$PlaybackNotifier {
       await _saveLastPlayedMusicId(musicId);
       await audioHandler.loadTrack(trackPath);
 
-      state = AsyncData(state.valueOrNull!.copyWith(isPlaying: true));
-      audioHandler.play();
+      if (autoplay) {
+        state = AsyncData(state.valueOrNull!.copyWith(isPlaying: true));
+        audioHandler.play();
+      } else {
+        state = AsyncData(state.valueOrNull!.copyWith(isPlaying: false));
+      }
       return;
     }
 
     // Mesma faixa que já está carregada: só retoma se estava pausada.
-    if (!current.isPlaying) {
+    if (autoplay && !current.isPlaying) {
       state = AsyncData(current.copyWith(isPlaying: true));
       audioHandler.play();
     }

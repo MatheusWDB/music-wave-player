@@ -37,12 +37,12 @@ class BackupRestoreSection extends StatelessWidget {
         FilledButton.icon(
           onPressed: isPicking ? null : onImport,
           icon: isPicking
-              ? const SizedBox(
+              ? SizedBox(
                   width: 16,
                   height: 16,
                   child: CircularProgressIndicator(
                     strokeWidth: 2,
-                    color: Colors.white,
+                    color: colorScheme.onPrimary,
                   ),
                 )
               : const Icon(Icons.file_open_outlined),

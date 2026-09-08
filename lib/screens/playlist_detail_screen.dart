@@ -7,10 +7,10 @@ import 'package:music_wave_player/components/track_selection_bottom_sheet.dart';
 import 'package:music_wave_player/data/playlist_database.dart';
 import 'package:music_wave_player/models/music_track.dart';
 import 'package:music_wave_player/models/playlist.dart';
+import 'package:music_wave_player/providers/current_track_provider.dart';
 import 'package:music_wave_player/providers/indexing_notifier.dart';
 import 'package:music_wave_player/providers/playback_notifier.dart';
 import 'package:music_wave_player/providers/queue_notifier.dart';
-import 'package:music_wave_player/screens/full_player_screen.dart';
 import 'package:music_wave_player/services/favorites_service.dart';
 
 class PlaylistDetailScreen extends ConsumerStatefulWidget {
@@ -148,6 +148,7 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
+    final currentTrackId = ref.watch(currentTrackProvider)?.id;
     final allTracks =
         ref.watch(indexingNotifierProvider).valueOrNull?.indexedTracks ??
         const <MusicTrack>[];
@@ -160,11 +161,12 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
         actions: [
           if (_playlist.name != FavoritesService.favoritesName)
             IconButton(
-              icon: const Icon(Icons.edit_outlined),
+              icon: Icon(Icons.edit_outlined, color: colorScheme.onSurface),
               onPressed: _rename,
               tooltip: 'Renomear',
             ),
           PopupMenuButton<String>(
+            icon: Icon(Icons.more_vert, color: colorScheme.onSurface),
             onSelected: (value) async {
               if (value == 'play') {
                 await _playPlaylist(allTracks);
@@ -250,6 +252,7 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
                             final track = tracks[index];
                             return PlaylistTrackTile(
                               track: track,
+                              isCurrentTrack: track.id == currentTrackId,
                               onRemove: () => _removeTrack(track.id!),
                               onRate: () =>
                                   RatingBottomSheet.show(context, track: track),
@@ -262,14 +265,6 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
                                       indexedTracks: allTracks,
                                       trackPath: track.path,
                                     );
-                                Navigator.push(
-                                  context,
-                                  MaterialPageRoute(
-                                    builder: (_) => FullPlayerScreen(
-                                      initialTrackId: track.id,
-                                    ),
-                                  ),
-                                );
                               },
                             );
                           },

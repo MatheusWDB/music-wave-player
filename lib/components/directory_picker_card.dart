@@ -71,7 +71,7 @@ class DirectoryPickerCard extends ConsumerWidget {
             Text(
               "O app buscará arquivos de áudio apenas neste caminho e subpastas.",
               textAlign: TextAlign.center,
-              style: TextStyle(color: Colors.grey[300]),
+              style: TextStyle(color: colorScheme.onSurfaceVariant),
             ),
             Container(
               decoration: BoxDecoration(
@@ -122,9 +122,11 @@ class _DirectoryLabel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+
     return Text(
       "Diretório Selecionado",
-      style: TextStyle(color: Colors.grey[400], fontSize: 12.0),
+      style: TextStyle(color: colorScheme.onSurfaceVariant, fontSize: 12.0),
     );
   }
 }

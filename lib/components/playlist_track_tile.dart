@@ -6,6 +6,7 @@ import 'package:music_wave_player/models/music_track.dart';
 /// específico (remover da playlist, avaliar, ocultar).
 class PlaylistTrackTile extends StatelessWidget {
   final MusicTrack track;
+  final bool isCurrentTrack;
   final VoidCallback onTap;
   final VoidCallback onRemove;
   final VoidCallback onRate;
@@ -18,24 +19,32 @@ class PlaylistTrackTile extends StatelessWidget {
     required this.onRemove,
     required this.onRate,
     required this.onHide,
+    this.isCurrentTrack = false,
   });
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+
     return ListTile(
       leading: CoverArtWidget(
         coverPath: track.coverPath,
         size: 44,
         borderRadius: BorderRadius.circular(6),
       ),
-      title: Text(track.title, maxLines: 1, overflow: TextOverflow.ellipsis),
+      title: Text(
+        track.title,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: TextStyle(color: isCurrentTrack ? colorScheme.primary : null),
+      ),
       subtitle: Text(
         track.artist,
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
       ),
       trailing: PopupMenuButton<String>(
-        icon: const Icon(Icons.more_vert),
+        icon: Icon(Icons.more_vert, color: colorScheme.onSurfaceVariant),
         onSelected: (value) {
           switch (value) {
             case 'remove':

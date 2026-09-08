@@ -31,8 +31,8 @@ class CurrentQueueTile extends StatelessWidget {
         contentPadding: const EdgeInsets.only(left: 12, right: 8),
         leading: CoverArtWidget(
           coverPath: track.coverPath,
-          size: 44,
-          borderRadius: BorderRadius.circular(6),
+          size: 56,
+          borderRadius: BorderRadius.circular(8),
         ),
         title: Text(
           track.title,

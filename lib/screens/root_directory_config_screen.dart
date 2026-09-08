@@ -7,18 +7,23 @@ class RootDirectoryConfigScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+
     return Scaffold(
       appBar: AppBar(title: const Text('Biblioteca')),
-      body: const SafeArea(
+      body: SafeArea(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           spacing: 10.0,
           children: [
-            LibrarySetupHeader(),
-            DirectoryPickerCard(),
+            const LibrarySetupHeader(),
+            const DirectoryPickerCard(),
             Text(
               "Arquivos de áudio válidos: .mp3, .m4a, etc.",
-              style: TextStyle(color: Colors.grey, fontSize: 12.0),
+              style: TextStyle(
+                color: colorScheme.onSurfaceVariant,
+                fontSize: 12.0,
+              ),
             ),
           ],
         ),

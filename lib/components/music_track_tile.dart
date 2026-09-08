@@ -1,14 +1,24 @@
 import 'package:flutter/material.dart';
 import 'package:music_wave_player/components/cover_art_widget.dart';
-import 'package:music_wave_player/components/favorite_button.dart';
+import 'package:music_wave_player/components/track_options_bottom_sheet.dart';
 import 'package:music_wave_player/models/music_track.dart';
 
 /// Item de lista de uma música, com suporte a modo de seleção (checkbox no
 /// lugar da capa) e menu de ações rápidas quando fora do modo de seleção.
+///
+/// Visual chapado (sem fundo próprio por item) — o destaque de elevação
+/// fica reservado ao miniplayer.
 class MusicTrackTile extends StatelessWidget {
+  /// Altura total de cada item (conteúdo + margem), usada pelo
+  /// [ScrollController] em `musics_tab.dart` para rolar até uma música
+  /// específica sem precisar medir o layout. Se o padding, a margem ou o
+  /// tamanho da capa mudarem aqui, atualize esta constante também.
+  static const double itemExtent = 76;
+
   final MusicTrack track;
   final bool isSelecting;
   final bool isSelected;
+  final bool isCurrentTrack;
   final VoidCallback onTap;
   final VoidCallback onToggleSelection;
   final VoidCallback onEdit;
@@ -31,6 +41,7 @@ class MusicTrackTile extends StatelessWidget {
     required this.onInsertNext,
     required this.onAddToEnd,
     required this.onHide,
+    this.isCurrentTrack = false,
   });
 
   @override
@@ -40,13 +51,17 @@ class MusicTrackTile extends StatelessWidget {
     return InkWell(
       onTap: isSelecting ? onToggleSelection : onTap,
       onLongPress: onToggleSelection,
-      borderRadius: BorderRadius.circular(12),
-      child: Card(
-        color: isSelected
-            ? colorScheme.primaryContainer.withValues(alpha: 0.5)
-            : null,
+      borderRadius: BorderRadius.circular(8),
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 8),
+        decoration: BoxDecoration(
+          color: isSelected
+              ? colorScheme.primary.withValues(alpha: 0.12)
+              : Colors.transparent,
+          borderRadius: BorderRadius.circular(8),
+        ),
         child: Padding(
-          padding: const EdgeInsets.all(10),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
           child: Row(
             children: [
               if (isSelecting)
@@ -63,7 +78,7 @@ class MusicTrackTile extends StatelessWidget {
                   padding: const EdgeInsets.only(right: 12),
                   child: CoverArtWidget(
                     coverPath: track.coverPath,
-                    size: 48,
+                    size: 56,
                     borderRadius: BorderRadius.circular(6),
                   ),
                 ),
@@ -75,7 +90,10 @@ class MusicTrackTile extends StatelessWidget {
                       track.title,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontWeight: FontWeight.w500),
+                      style: TextStyle(
+                        fontWeight: FontWeight.w500,
+                        color: isCurrentTrack ? colorScheme.primary : null,
+                      ),
                     ),
                     const SizedBox(height: 2),
                     Text(
@@ -90,123 +108,27 @@ class MusicTrackTile extends StatelessWidget {
                   ],
                 ),
               ),
-              if (!isSelecting) FavoriteButton(trackId: track.id!),
               if (!isSelecting)
-                _ActionsMenu(
-                  onEdit: onEdit,
-                  onRate: onRate,
-                  onAddToPlaylist: onAddToPlaylist,
-                  onInsertNext: onInsertNext,
-                  onAddToEnd: onAddToEnd,
-                  onHide: onHide,
+                IconButton(
+                  icon: Icon(
+                    Icons.more_vert,
+                    color: colorScheme.onSurfaceVariant,
+                  ),
+                  onPressed: () => TrackOptionsBottomSheet.show(
+                    context,
+                    track: track,
+                    onEdit: onEdit,
+                    onRate: onRate,
+                    onAddToPlaylist: onAddToPlaylist,
+                    onInsertNext: onInsertNext,
+                    onAddToEnd: onAddToEnd,
+                    onHide: onHide,
+                  ),
                 ),
             ],
           ),
         ),
       ),
-    );
-  }
-}
-
-class _ActionsMenu extends StatelessWidget {
-  final VoidCallback onEdit;
-  final VoidCallback onRate;
-  final VoidCallback onAddToPlaylist;
-  final VoidCallback onInsertNext;
-  final VoidCallback onAddToEnd;
-  final VoidCallback onHide;
-
-  const _ActionsMenu({
-    required this.onEdit,
-    required this.onRate,
-    required this.onAddToPlaylist,
-    required this.onInsertNext,
-    required this.onAddToEnd,
-    required this.onHide,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return PopupMenuButton<String>(
-      icon: const Icon(Icons.more_vert),
-      onSelected: (value) {
-        switch (value) {
-          case 'insert_next':
-            onInsertNext();
-          case 'add_end':
-            onAddToEnd();
-          case 'edit':
-            onEdit();
-          case 'rate':
-            onRate();
-          case 'playlist':
-            onAddToPlaylist();
-          case 'hide':
-            onHide();
-        }
-      },
-      itemBuilder: (_) => const [
-        PopupMenuItem(
-          value: 'insert_next',
-          child: Row(
-            children: [
-              Icon(Icons.queue_play_next_outlined),
-              SizedBox(width: 12),
-              Text('Tocar a seguir'),
-            ],
-          ),
-        ),
-        PopupMenuItem(
-          value: 'add_end',
-          child: Row(
-            children: [
-              Icon(Icons.add_to_queue_outlined),
-              SizedBox(width: 12),
-              Text('Adicionar à fila'),
-            ],
-          ),
-        ),
-        PopupMenuItem(
-          value: 'edit',
-          child: Row(
-            children: [
-              Icon(Icons.edit_outlined),
-              SizedBox(width: 12),
-              Text('Editar informações'),
-            ],
-          ),
-        ),
-        PopupMenuItem(
-          value: 'rate',
-          child: Row(
-            children: [
-              Icon(Icons.star_outline),
-              SizedBox(width: 12),
-              Text('Avaliar'),
-            ],
-          ),
-        ),
-        PopupMenuItem(
-          value: 'playlist',
-          child: Row(
-            children: [
-              Icon(Icons.playlist_add_outlined),
-              SizedBox(width: 12),
-              Text('Adicionar à playlist'),
-            ],
-          ),
-        ),
-        PopupMenuItem(
-          value: 'hide',
-          child: Row(
-            children: [
-              Icon(Icons.visibility_off_outlined),
-              SizedBox(width: 12),
-              Text('Ocultar'),
-            ],
-          ),
-        ),
-      ],
     );
   }
 }

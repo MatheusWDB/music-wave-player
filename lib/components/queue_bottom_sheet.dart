@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:music_wave_player/components/current_queue_tile.dart';
-import 'package:music_wave_player/components/queue_header_bar.dart';
+import 'package:music_wave_player/components/draggable_sheet_scaffold.dart';
 import 'package:music_wave_player/components/queue_upcoming_list.dart';
 import 'package:music_wave_player/components/timer_active_banner.dart';
 import 'package:music_wave_player/components/timer_bottom_sheet.dart';
@@ -29,14 +29,6 @@ class QueueBottomSheet extends ConsumerStatefulWidget {
 }
 
 class _QueueBottomSheetState extends ConsumerState<QueueBottomSheet> {
-  final ScrollController _scrollController = ScrollController();
-
-  @override
-  void dispose() {
-    _scrollController.dispose();
-    super.dispose();
-  }
-
   Future<void> _saveQueueAsPlaylist(
     BuildContext context,
     List<int> playbackQueue,
@@ -126,7 +118,6 @@ class _QueueBottomSheetState extends ConsumerState<QueueBottomSheet> {
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
-    final bottomInset = MediaQuery.of(context).padding.bottom;
 
     final queueState = ref.watch(queueNotifierProvider);
     final playbackState = ref.watch(playbackNotifierProvider).valueOrNull;
@@ -160,41 +151,54 @@ class _QueueBottomSheetState extends ConsumerState<QueueBottomSheet> {
     // fila completa (offset pela faixa atual).
     int realIndexOf(int upcomingIndex) => currentIndex + 1 + upcomingIndex;
 
-    return Material(
-      color: colorScheme.surface,
-      borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-      child: SizedBox(
-        height: MediaQuery.of(context).size.height * 0.75,
-        child: Column(
-          children: [
-            // Alça
-            Center(
-              child: Container(
-                width: 40,
-                height: 4,
-                margin: const EdgeInsets.symmetric(vertical: 12),
-                decoration: BoxDecoration(
-                  color: colorScheme.onSurfaceVariant.withValues(alpha: 0.3),
-                  borderRadius: BorderRadius.circular(2),
+    return DraggableSheetScaffold(
+      title: 'Fila de reprodução',
+      actions: [
+        if (upcomingTracks.isNotEmpty)
+          PopupMenuButton<String>(
+            icon: Icon(Icons.more_vert, color: colorScheme.onSurfaceVariant),
+            onSelected: (value) {
+              switch (value) {
+                case 'save':
+                  _saveQueueAsPlaylist(context, fullQueue);
+                case 'clear':
+                  _confirmClearQueue(context, playbackState?.lastPlayedMusicId);
+              }
+            },
+            itemBuilder: (_) => const [
+              PopupMenuItem(
+                value: 'save',
+                child: Row(
+                  children: [
+                    Icon(Icons.playlist_add),
+                    SizedBox(width: 12),
+                    Text('Salvar fila como playlist'),
+                  ],
                 ),
               ),
-            ),
+              PopupMenuItem(
+                value: 'clear',
+                child: Row(
+                  children: [
+                    Icon(Icons.playlist_remove),
+                    SizedBox(width: 12),
+                    Text('Limpar fila'),
+                  ],
+                ),
+              ),
+            ],
+          ),
+      ],
+      bodyBuilder: (context, scrollController) {
+        final bottomInset = MediaQuery.of(context).padding.bottom;
 
-            QueueHeaderBar(
-              hasUpcomingTracks: upcomingTracks.isNotEmpty,
-              onSaveAsPlaylist: () => _saveQueueAsPlaylist(context, fullQueue),
-              onClearQueue: () =>
-                  _confirmClearQueue(context, playbackState?.lastPlayedMusicId),
-              onClose: () => Navigator.pop(context),
-            ),
-
+        return Column(
+          children: [
             if (timer.isActive)
               TimerActiveBanner(
                 remainingLabel: timer.remainingLabel,
                 onTap: () => TimerBottomSheet.show(context),
               ),
-
-            const Divider(height: 1),
 
             if (currentTrack != null)
               CurrentQueueTile(
@@ -214,8 +218,8 @@ class _QueueBottomSheetState extends ConsumerState<QueueBottomSheet> {
               child: QueueUpcomingList(
                 upcomingTracks: upcomingTracks,
                 hasCurrentTrack: currentTrack != null,
-                scrollController: _scrollController,
-                bottomPadding: bottomInset,
+                scrollController: scrollController,
+                bottomPadding: 8,
                 onReorder: (oldIndex, newIndex) {
                   ref
                       .read(queueNotifierProvider.notifier)
@@ -242,9 +246,82 @@ class _QueueBottomSheetState extends ConsumerState<QueueBottomSheet> {
                 },
               ),
             ),
+
+            // Ordem aleatória e temporizador — atalhos rápidos, igual apps de
+            // música consolidados.
+            Padding(
+              padding: EdgeInsets.fromLTRB(16, 8, 16, 12 + bottomInset),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: () => ref
+                          .read(playbackNotifierProvider.notifier)
+                          .toggleShuffle(),
+                      icon: Icon(
+                        Icons.shuffle,
+                        size: 18,
+                        color: (playbackState?.isShuffleActive ?? false)
+                            ? colorScheme.primary
+                            : colorScheme.onSurfaceVariant,
+                      ),
+                      label: Text(
+                        'Ordem aleatória',
+                        style: TextStyle(
+                          color: (playbackState?.isShuffleActive ?? false)
+                              ? colorScheme.primary
+                              : colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                      style: OutlinedButton.styleFrom(
+                        side: BorderSide(
+                          color: (playbackState?.isShuffleActive ?? false)
+                              ? colorScheme.primary
+                              : colorScheme.outlineVariant,
+                        ),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(24),
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: () => TimerBottomSheet.show(context),
+                      icon: Icon(
+                        Icons.timer_outlined,
+                        size: 18,
+                        color: timer.isActive
+                            ? colorScheme.primary
+                            : colorScheme.onSurfaceVariant,
+                      ),
+                      label: Text(
+                        'Timer',
+                        style: TextStyle(
+                          color: timer.isActive
+                              ? colorScheme.primary
+                              : colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                      style: OutlinedButton.styleFrom(
+                        side: BorderSide(
+                          color: timer.isActive
+                              ? colorScheme.primary
+                              : colorScheme.outlineVariant,
+                        ),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(24),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
           ],
-        ),
-      ),
+        );
+      },
     );
   }
 }

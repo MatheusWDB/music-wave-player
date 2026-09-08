@@ -53,13 +53,14 @@ class _FavoriteButtonState extends State<FavoriteButton> {
 
   @override
   Widget build(BuildContext context) {
-    final color = widget.activeColor ?? Theme.of(context).colorScheme.error;
+    final colorScheme = Theme.of(context).colorScheme;
+    final activeColor = widget.activeColor ?? colorScheme.error;
     return IconButton(
       iconSize: widget.iconSize,
       onPressed: _loading ? null : _toggle,
       icon: Icon(
         _isFavorite ? Icons.favorite : Icons.favorite_border,
-        color: _isFavorite ? color : null,
+        color: _isFavorite ? activeColor : colorScheme.onSurfaceVariant,
       ),
     );
   }

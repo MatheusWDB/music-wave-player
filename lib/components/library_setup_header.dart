@@ -15,12 +15,12 @@ class LibrarySetupHeader extends StatelessWidget {
           mainAxisAlignment: MainAxisAlignment.center,
           spacing: 6.0,
           children: [
-            const Icon(Icons.headphones),
+            Icon(Icons.headphones, color: colorScheme.onSurface),
             Text(
-              'LocalPlay',
+              'MusicWave Player',
               style: TextStyle(
                 color: colorScheme.onSurface,
-                fontSize: 28.0,
+                fontSize: 22.0,
                 fontWeight: FontWeight.bold,
               ),
             ),

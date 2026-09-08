@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:music_wave_player/components/cover_art_widget.dart';
-import 'package:music_wave_player/components/favorite_button.dart';
 import 'package:music_wave_player/components/mini_player_controls.dart';
 import 'package:music_wave_player/models/music_track.dart';
 import 'package:music_wave_player/providers/current_track_provider.dart';
@@ -28,24 +27,16 @@ class MiniPlayerComponent extends ConsumerWidget {
 
     return GestureDetector(
       onTap: () {
-        final int trackId = currentTrack.id!;
-        ref
-            .read(playbackNotifierProvider.notifier)
-            .playTrack(
-              trackId,
-              indexedTracks: indexedTracks,
-              trackPath: currentTrack.path,
-            );
         Navigator.push(
           context,
           MaterialPageRoute(
-            builder: (_) => FullPlayerScreen(initialTrackId: trackId),
+            builder: (_) => FullPlayerScreen(initialTrackId: currentTrack.id!),
           ),
         );
       },
       child: Container(
-        height: 65.0,
-        padding: const EdgeInsets.all(10.0),
+        height: 72.0,
+        padding: const EdgeInsets.symmetric(horizontal: 10.0, vertical: 6.0),
         decoration: BoxDecoration(
           color: colorScheme.surface,
           borderRadius: BorderRadius.circular(10.0),
@@ -54,8 +45,8 @@ class MiniPlayerComponent extends ConsumerWidget {
           children: [
             CoverArtWidget(
               coverPath: currentTrack.coverPath,
-              size: 45,
-              borderRadius: BorderRadius.circular(5),
+              size: 56,
+              borderRadius: BorderRadius.circular(6),
             ),
             const SizedBox(width: 10),
             Expanded(
@@ -67,7 +58,7 @@ class MiniPlayerComponent extends ConsumerWidget {
                     currentTrack.title,
                     style: TextStyle(
                       fontWeight: FontWeight.bold,
-                      color: colorScheme.onSurfaceVariant,
+                      color: colorScheme.onSurface,
                     ),
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -82,7 +73,6 @@ class MiniPlayerComponent extends ConsumerWidget {
                 ],
               ),
             ),
-            FavoriteButton(trackId: currentTrack.id!, iconSize: 22),
             MiniPlayerControls(
               isPlaying: isPlaying,
               onPrevious: () => ref

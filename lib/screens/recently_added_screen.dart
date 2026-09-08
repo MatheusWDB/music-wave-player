@@ -2,9 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:music_wave_player/components/cover_art_widget.dart';
 import 'package:music_wave_player/models/music_track.dart';
+import 'package:music_wave_player/providers/current_track_provider.dart';
 import 'package:music_wave_player/providers/indexing_notifier.dart';
 import 'package:music_wave_player/providers/playback_notifier.dart';
-import 'package:music_wave_player/screens/full_player_screen.dart';
 
 class RecentlyAddedScreen extends ConsumerWidget {
   const RecentlyAddedScreen({super.key});
@@ -38,6 +38,7 @@ class RecentlyAddedScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final colorScheme = Theme.of(context).colorScheme;
+    final currentTrackId = ref.watch(currentTrackProvider)?.id;
     final allTracks =
         ref.watch(indexingNotifierProvider).valueOrNull?.indexedTracks ??
         const <MusicTrack>[];
@@ -68,6 +69,11 @@ class RecentlyAddedScreen extends ConsumerWidget {
                     track.title,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: track.id == currentTrackId
+                          ? colorScheme.primary
+                          : null,
+                    ),
                   ),
                   subtitle: Text(
                     '${track.artist.split(';').first.trim()} · ${track.album}',
@@ -90,13 +96,6 @@ class RecentlyAddedScreen extends ConsumerWidget {
                           indexedTracks: allTracks,
                           trackPath: track.path,
                         );
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) =>
-                            FullPlayerScreen(initialTrackId: track.id),
-                      ),
-                    );
                   },
                 );
               },

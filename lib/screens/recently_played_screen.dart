@@ -5,7 +5,6 @@ import 'package:music_wave_player/models/music_track.dart';
 import 'package:music_wave_player/providers/current_track_provider.dart';
 import 'package:music_wave_player/providers/indexing_notifier.dart';
 import 'package:music_wave_player/providers/playback_notifier.dart';
-import 'package:music_wave_player/screens/full_player_screen.dart';
 
 class RecentlyPlayedScreen extends ConsumerStatefulWidget {
   const RecentlyPlayedScreen({super.key});
@@ -31,7 +30,7 @@ class _RecentlyPlayedScreenState extends ConsumerState<RecentlyPlayedScreen> {
         actions: [
           // Filtro de quantidade
           PopupMenuButton<int>(
-            icon: const Icon(Icons.filter_list),
+            icon: Icon(Icons.filter_list, color: colorScheme.onSurface),
             tooltip: 'Quantidade exibida',
             initialValue: _limit,
             onSelected: (value) => setState(() => _limit = value),
@@ -63,7 +62,10 @@ class _RecentlyPlayedScreenState extends ConsumerState<RecentlyPlayedScreen> {
           ),
           if (allTracks.isNotEmpty)
             IconButton(
-              icon: const Icon(Icons.delete_sweep_outlined),
+              icon: Icon(
+                Icons.delete_sweep_outlined,
+                color: colorScheme.onSurface,
+              ),
               tooltip: 'Limpar histórico',
               onPressed: () => _confirmClear(context),
             ),
@@ -124,6 +126,7 @@ class _TrackTile extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final colorScheme = Theme.of(context).colorScheme;
+    final isCurrentTrack = ref.watch(currentTrackProvider)?.id == track.id;
 
     return ListTile(
       leading: CoverArtWidget(
@@ -131,7 +134,12 @@ class _TrackTile extends ConsumerWidget {
         size: 48,
         borderRadius: BorderRadius.circular(6),
       ),
-      title: Text(track.title, maxLines: 1, overflow: TextOverflow.ellipsis),
+      title: Text(
+        track.title,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: TextStyle(color: isCurrentTrack ? colorScheme.primary : null),
+      ),
       subtitle: Text(
         '${track.artist} · ${track.album}',
         maxLines: 1,
@@ -149,12 +157,6 @@ class _TrackTile extends ConsumerWidget {
               indexedTracks: allTracks,
               trackPath: track.path,
             );
-        Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (_) => FullPlayerScreen(initialTrackId: track.id),
-          ),
-        );
       },
     );
   }

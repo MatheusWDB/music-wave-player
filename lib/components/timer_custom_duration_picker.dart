@@ -20,7 +20,7 @@ class TimerCustomDurationPicker extends StatefulWidget {
 
 class _TimerCustomDurationPickerState extends State<TimerCustomDurationPicker> {
   int _hours = 0;
-  int _minutes = 30;
+  int _minutes = 0;
 
   void _confirm() {
     final seconds = (_hours * 3600) + (_minutes * 60);

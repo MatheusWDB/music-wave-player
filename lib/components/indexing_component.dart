@@ -45,8 +45,6 @@ class IndexingComponent extends ConsumerWidget {
           style: ElevatedButton.styleFrom(
             backgroundColor: colorScheme.secondary,
             foregroundColor: colorScheme.onSecondary,
-            disabledBackgroundColor: Colors.grey[700],
-            disabledForegroundColor: Colors.grey[400],
             minimumSize: const Size.fromHeight(45.0),
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(8.0),
@@ -57,12 +55,12 @@ class IndexingComponent extends ConsumerWidget {
                     ref.read(indexingNotifierProvider.notifier).startIndexing()
               : null,
           icon: info.isBusy
-              ? const SizedBox(
+              ? SizedBox(
                   width: 16,
                   height: 16,
                   child: CircularProgressIndicator(
                     strokeWidth: 2,
-                    color: Colors.white,
+                    color: colorScheme.onSecondary,
                   ),
                 )
               : const Icon(Icons.search),
@@ -74,7 +72,10 @@ class IndexingComponent extends ConsumerWidget {
         if (formattedDate != null)
           Text(
             'Última varredura: $formattedDate',
-            style: TextStyle(color: Colors.grey[400], fontSize: 12.0),
+            style: TextStyle(
+              color: colorScheme.onSurfaceVariant,
+              fontSize: 12.0,
+            ),
           ),
       ],
     );

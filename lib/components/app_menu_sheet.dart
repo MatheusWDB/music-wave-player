@@ -41,6 +41,7 @@ class AppMenuSheet extends StatelessWidget {
                 ),
               ),
             ),
+            const Divider(height: 1),
             ListTile(
               leading: Icon(
                 Icons.library_music_outlined,

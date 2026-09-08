@@ -7,6 +7,7 @@ class PathComponent extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final colorScheme = Theme.of(context).colorScheme;
     final rootDirectory = ref.watch(
       indexingNotifierProvider.select((s) => s.valueOrNull?.rootDirectory),
     );
@@ -16,7 +17,7 @@ class PathComponent extends ConsumerWidget {
       maxLines: 3,
       overflow: TextOverflow.ellipsis,
       style: TextStyle(
-        color: rootDirectory == null ? Colors.grey[600] : null,
+        color: rootDirectory == null ? colorScheme.onSurfaceVariant : null,
         fontStyle: rootDirectory == null ? FontStyle.italic : FontStyle.normal,
       ),
     );

@@ -89,7 +89,10 @@ class _HiddenTracksScreenState extends ConsumerState<HiddenTracksScreen> {
         actions: [
           if (_tracks.isNotEmpty && !_isSelecting)
             IconButton(
-              icon: const Icon(Icons.visibility_outlined),
+              icon: Icon(
+                Icons.visibility_outlined,
+                color: colorScheme.onSurface,
+              ),
               tooltip: 'Reexibir todas',
               onPressed: _unhideAll,
             ),

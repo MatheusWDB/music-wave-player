@@ -48,19 +48,19 @@ class PlaybackControlsRow extends StatelessWidget {
               onPressed: onShuffleToggle,
             ),
             IconButton(
-              icon: Icon(Icons.skip_previous, color: colorScheme.primary),
+              icon: Icon(Icons.skip_previous, color: colorScheme.onSurface),
               iconSize: 44,
               onPressed: onPrevious,
             ),
             Container(
               decoration: BoxDecoration(
-                color: colorScheme.primary,
+                color: colorScheme.onSurface,
                 shape: BoxShape.circle,
               ),
               child: IconButton(
                 icon: Icon(
                   isPlaying ? Icons.pause : Icons.play_arrow,
-                  color: colorScheme.onPrimary,
+                  color: colorScheme.surface,
                 ),
                 iconSize: 38,
                 padding: const EdgeInsets.all(10),
@@ -68,7 +68,7 @@ class PlaybackControlsRow extends StatelessWidget {
               ),
             ),
             IconButton(
-              icon: Icon(Icons.skip_next, color: colorScheme.primary),
+              icon: Icon(Icons.skip_next, color: colorScheme.onSurface),
               iconSize: 44,
               onPressed: onNext,
             ),

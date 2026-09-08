@@ -24,9 +24,9 @@ class LibraryTopBar extends StatelessWidget {
         children: [
           Expanded(
             child: Text(
-              'LocalPlay',
+              'MusicWave Player',
               style: TextStyle(
-                fontSize: 22.0,
+                fontSize: 18.0,
                 fontWeight: FontWeight.bold,
                 color: colorScheme.onSurface,
               ),

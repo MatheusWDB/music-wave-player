@@ -5,10 +5,10 @@ import 'package:music_wave_player/components/listening_stats_section.dart';
 import 'package:music_wave_player/components/rating_bottom_sheet.dart';
 import 'package:music_wave_player/data/play_session_database.dart';
 import 'package:music_wave_player/models/music_track.dart';
+import 'package:music_wave_player/providers/current_track_provider.dart';
 import 'package:music_wave_player/providers/indexing_notifier.dart';
 import 'package:music_wave_player/providers/playback_notifier.dart';
 import 'package:music_wave_player/providers/queue_notifier.dart';
-import 'package:music_wave_player/screens/full_player_screen.dart';
 
 class AlbumDetailScreen extends ConsumerStatefulWidget {
   final String album;
@@ -141,6 +141,7 @@ class _AlbumDetailScreenState extends ConsumerState<AlbumDetailScreen> {
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
+    final currentTrackId = ref.watch(currentTrackProvider)?.id;
     final ids = _tracks.map((t) => t.id!).toList();
     final coverPath = _tracks
         .firstWhere((t) => t.coverPath != null, orElse: () => _tracks.first)
@@ -294,6 +295,11 @@ class _AlbumDetailScreenState extends ConsumerState<AlbumDetailScreen> {
                           track.title,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: track.id == currentTrackId
+                                ? colorScheme.primary
+                                : null,
+                          ),
                         ),
                         subtitle: Text(
                           track.artist,
@@ -317,7 +323,10 @@ class _AlbumDetailScreenState extends ConsumerState<AlbumDetailScreen> {
                                 ),
                               ),
                             PopupMenuButton<String>(
-                              icon: const Icon(Icons.more_vert),
+                              icon: Icon(
+                                Icons.more_vert,
+                                color: colorScheme.onSurfaceVariant,
+                              ),
                               onSelected: (value) async {
                                 if (value == 'insert_next') {
                                   ref
@@ -399,13 +408,6 @@ class _AlbumDetailScreenState extends ConsumerState<AlbumDetailScreen> {
                                 indexedTracks: allTracks,
                                 trackPath: track.path,
                               );
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) =>
-                                  FullPlayerScreen(initialTrackId: track.id),
-                            ),
-                          );
                         },
                       );
                     },

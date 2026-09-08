@@ -11,6 +11,7 @@ class SearchResultsList extends StatelessWidget {
   final Map<String, List<MusicTrack>> artists;
   final Map<String, List<MusicTrack>> albums;
   final List<Playlist> playlists;
+  final int? currentTrackId;
   final ValueChanged<MusicTrack> onTrackTap;
   final void Function(String artist, List<MusicTrack> tracks) onArtistTap;
   final void Function(String album, List<MusicTrack> tracks) onAlbumTap;
@@ -30,6 +31,7 @@ class SearchResultsList extends StatelessWidget {
     required this.onPlaylistTap,
     required this.onRateTrack,
     required this.onHideTrack,
+    this.currentTrackId,
   });
 
   @override
@@ -51,6 +53,11 @@ class SearchResultsList extends StatelessWidget {
                 track.title,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: track.id == currentTrackId
+                      ? colorScheme.primary
+                      : null,
+                ),
               ),
               subtitle: Text(
                 '${track.artist} · ${track.album}',
@@ -58,7 +65,10 @@ class SearchResultsList extends StatelessWidget {
                 overflow: TextOverflow.ellipsis,
               ),
               trailing: PopupMenuButton<String>(
-                icon: const Icon(Icons.more_vert),
+                icon: Icon(
+                  Icons.more_vert,
+                  color: colorScheme.onSurfaceVariant,
+                ),
                 onSelected: (value) {
                   if (value == 'rate') {
                     onRateTrack(track);

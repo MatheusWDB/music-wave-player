@@ -5,9 +5,9 @@ import 'package:music_wave_player/components/period_filter_bar.dart';
 import 'package:music_wave_player/components/ranked_track_tile.dart';
 import 'package:music_wave_player/data/play_session_database.dart';
 import 'package:music_wave_player/models/music_track.dart';
+import 'package:music_wave_player/providers/current_track_provider.dart';
 import 'package:music_wave_player/providers/indexing_notifier.dart';
 import 'package:music_wave_player/providers/playback_notifier.dart';
-import 'package:music_wave_player/screens/full_player_screen.dart';
 
 enum _SortOrder { mostPlayed, leastPlayed }
 
@@ -122,17 +122,12 @@ class _MostPlayedScreenState extends ConsumerState<MostPlayedScreen> {
     ref
         .read(playbackNotifierProvider.notifier)
         .playTrack(track.id!, indexedTracks: allTracks, trackPath: track.path);
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => FullPlayerScreen(initialTrackId: track.id),
-      ),
-    );
   }
 
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
+    final currentTrackId = ref.watch(currentTrackProvider)?.id;
     final tracks =
         ref.watch(indexingNotifierProvider).valueOrNull?.indexedTracks ??
         const <MusicTrack>[];
@@ -147,7 +142,7 @@ class _MostPlayedScreenState extends ConsumerState<MostPlayedScreen> {
         ),
         actions: [
           PopupMenuButton<_SortOrder>(
-            icon: const Icon(Icons.swap_vert),
+            icon: Icon(Icons.swap_vert, color: colorScheme.onSurface),
             tooltip: 'Ordenação',
             initialValue: _sortOrder,
             onSelected: (value) => setState(() => _sortOrder = value),
@@ -240,6 +235,7 @@ class _MostPlayedScreenState extends ConsumerState<MostPlayedScreen> {
                         artist: stat.track.artist.split(';').first.trim(),
                         seconds: stat.seconds,
                         durationMs: stat.track.durationMs,
+                        isCurrentTrack: stat.track.id == currentTrackId,
                         onTap: () => _openTrack(stat.track, tracks),
                       );
                     },

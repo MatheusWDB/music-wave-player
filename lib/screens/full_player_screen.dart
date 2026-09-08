@@ -133,7 +133,7 @@ class _FullPlayerScreenState extends ConsumerState<FullPlayerScreen>
       appBar: AppBar(
         backgroundColor: colorScheme.surface,
         elevation: 0,
-        title: const Text('LocalPlay'),
+        title: const Text('MusicWave Player'),
         centerTitle: true,
         actions: [
           FavoriteButton(trackId: currentTrack.id!),
@@ -141,18 +141,20 @@ class _FullPlayerScreenState extends ConsumerState<FullPlayerScreen>
           IconButton(
             icon: Icon(
               Icons.bedtime_outlined,
-              color: timerActive ? colorScheme.secondary : null,
+              color: timerActive
+                  ? colorScheme.secondary
+                  : colorScheme.onSurfaceVariant,
             ),
             tooltip: 'Temporizador de sono',
             onPressed: () => TimerBottomSheet.show(context),
           ),
           IconButton(
-            icon: const Icon(Icons.queue_music),
+            icon: Icon(Icons.queue_music, color: colorScheme.onSurfaceVariant),
             tooltip: 'Fila de reprodução',
             onPressed: () => QueueBottomSheet.show(context),
           ),
           PopupMenuButton<String>(
-            icon: const Icon(Icons.more_vert),
+            icon: Icon(Icons.more_vert, color: colorScheme.onSurfaceVariant),
             onSelected: (value) {
               if (value == 'edit') {
                 EditTrackBottomSheet.show(context, track: currentTrack);

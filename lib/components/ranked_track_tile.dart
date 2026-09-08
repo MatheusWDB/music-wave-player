@@ -11,6 +11,7 @@ class RankedTrackTile extends StatelessWidget {
   final String artist;
   final int seconds;
   final int durationMs;
+  final bool isCurrentTrack;
   final VoidCallback onTap;
 
   const RankedTrackTile({
@@ -21,6 +22,7 @@ class RankedTrackTile extends StatelessWidget {
     required this.seconds,
     required this.durationMs,
     required this.onTap,
+    this.isCurrentTrack = false,
   });
 
   static String _formatDuration(int totalMs) {
@@ -43,7 +45,14 @@ class RankedTrackTile extends StatelessWidget {
       title: Row(
         children: [
           Expanded(
-            child: Text(title, maxLines: 1, overflow: TextOverflow.ellipsis),
+            child: Text(
+              title,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: isCurrentTrack ? colorScheme.primary : null,
+              ),
+            ),
           ),
           if (!hasPlays)
             Container(

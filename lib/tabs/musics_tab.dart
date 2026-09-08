@@ -7,9 +7,9 @@ import 'package:music_wave_player/components/rating_bottom_sheet.dart';
 import 'package:music_wave_player/components/selection_action_bar.dart';
 import 'package:music_wave_player/data/playlist_database.dart';
 import 'package:music_wave_player/models/music_track.dart';
+import 'package:music_wave_player/providers/current_track_provider.dart';
 import 'package:music_wave_player/providers/indexing_notifier.dart';
 import 'package:music_wave_player/providers/queue_notifier.dart';
-import 'package:music_wave_player/screens/full_player_screen.dart';
 import 'package:music_wave_player/services/favorites_service.dart';
 
 class MusicsTab extends ConsumerStatefulWidget {
@@ -24,7 +24,43 @@ class MusicsTab extends ConsumerStatefulWidget {
 
 class _MusicsTabState extends ConsumerState<MusicsTab> {
   final Set<int> _selected = {};
+  final ScrollController _scrollController = ScrollController();
   bool get _isSelecting => _selected.isNotEmpty;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback(
+      (_) => _scrollToCurrentTrack(),
+    );
+  }
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  // Deixa a música tocando no topo da tela ao abrir a aba, sem precisar
+  // medir o layout — usa MusicTrackTile.itemExtent, que é a altura fixa do
+  // item.
+  void _scrollToCurrentTrack() {
+    if (!_scrollController.hasClients) return;
+
+    final currentTrackId = ref.read(currentTrackProvider)?.id;
+    if (currentTrackId == null) return;
+
+    final index = widget.tracks.indexWhere((t) => t.id == currentTrackId);
+    if (index < 0) return;
+
+    final target = index * MusicTrackTile.itemExtent;
+
+    _scrollController.animateTo(
+      target.clamp(0.0, _scrollController.position.maxScrollExtent),
+      duration: const Duration(milliseconds: 400),
+      curve: Curves.easeOut,
+    );
+  }
 
   void _toggleSelection(int id) {
     setState(() {
@@ -119,13 +155,15 @@ class _MusicsTabState extends ConsumerState<MusicsTab> {
   Widget build(BuildContext context) {
     final queueNotifier = ref.read(queueNotifierProvider.notifier);
     final indexingNotifier = ref.read(indexingNotifierProvider.notifier);
+    final currentTrackId = ref.watch(currentTrackProvider)?.id;
 
     return Stack(
       children: [
-        ListView.separated(
+        ListView.builder(
+          controller: _scrollController,
           padding: EdgeInsets.only(bottom: _isSelecting ? 80 : 10),
           itemCount: widget.tracks.length,
-          separatorBuilder: (_, __) => const SizedBox(height: 8),
+          itemExtent: MusicTrackTile.itemExtent,
           itemBuilder: (context, index) {
             final track = widget.tracks[index];
             final isSelected = _selected.contains(track.id);
@@ -134,16 +172,9 @@ class _MusicsTabState extends ConsumerState<MusicsTab> {
               track: track,
               isSelecting: _isSelecting,
               isSelected: isSelected,
+              isCurrentTrack: track.id == currentTrackId,
               onToggleSelection: () => _toggleSelection(track.id!),
-              onTap: () {
-                widget.onTrackTap(track.id!);
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => FullPlayerScreen(initialTrackId: track.id),
-                  ),
-                );
-              },
+              onTap: () => widget.onTrackTap(track.id!),
               onEdit: () => EditTrackBottomSheet.show(context, track: track),
               onRate: () => RatingBottomSheet.show(context, track: track),
               onAddToPlaylist: () => _addTracksToPlaylist([track.id!]),

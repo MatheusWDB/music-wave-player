@@ -64,12 +64,12 @@ class BackupExportSection extends StatelessWidget {
               child: FilledButton.icon(
                 onPressed: isSavingToFolder ? null : onSaveToFolder,
                 icon: isSavingToFolder
-                    ? const SizedBox(
+                    ? SizedBox(
                         width: 16,
                         height: 16,
                         child: CircularProgressIndicator(
                           strokeWidth: 2,
-                          color: Colors.white,
+                          color: colorScheme.onPrimary,
                         ),
                       )
                     : const Icon(Icons.folder_outlined),

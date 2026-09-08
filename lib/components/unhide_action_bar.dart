@@ -39,7 +39,7 @@ class UnhideActionBar extends StatelessWidget {
           children: [
             IconButton(
               onPressed: onClear,
-              icon: const Icon(Icons.close),
+              icon: Icon(Icons.close, color: colorScheme.onSurfaceVariant),
               tooltip: 'Cancelar seleção',
             ),
             Expanded(

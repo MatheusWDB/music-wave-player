@@ -56,7 +56,7 @@ class _RecapWidgetState extends State<RecapWidget> {
       await SharePlus.instance.share(
         ShareParams(
           files: [XFile(file.path)],
-          text: 'Meu recap ${result.period.label} no LocalPlay 🎵',
+          text: 'Meu recap ${result.period.label} no MusicWave Player 🎵',
         ),
       );
     } finally {
@@ -146,7 +146,7 @@ class _RecapWidgetState extends State<RecapWidget> {
                 const Icon(Icons.headphones, color: Colors.white38, size: 14),
                 const SizedBox(width: 6),
                 Text(
-                  'LocalPlay',
+                  'MusicWave Player',
                   style: TextStyle(
                     color: Colors.white.withValues(alpha: 0.38),
                     fontSize: 12,

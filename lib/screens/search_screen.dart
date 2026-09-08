@@ -5,11 +5,11 @@ import 'package:music_wave_player/components/search_results_list.dart';
 import 'package:music_wave_player/data/playlist_database.dart';
 import 'package:music_wave_player/models/music_track.dart';
 import 'package:music_wave_player/models/playlist.dart';
+import 'package:music_wave_player/providers/current_track_provider.dart';
 import 'package:music_wave_player/providers/indexing_notifier.dart';
 import 'package:music_wave_player/providers/playback_notifier.dart';
 import 'package:music_wave_player/screens/album_detail_screen.dart';
 import 'package:music_wave_player/screens/artist_detail_screen.dart';
-import 'package:music_wave_player/screens/full_player_screen.dart';
 import 'package:music_wave_player/screens/playlist_detail_screen.dart';
 
 class SearchScreen extends ConsumerStatefulWidget {
@@ -104,12 +104,6 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
     ref
         .read(playbackNotifierProvider.notifier)
         .playTrack(track.id!, indexedTracks: allTracks, trackPath: track.path);
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => FullPlayerScreen(initialTrackId: track.id),
-      ),
-    );
   }
 
   void _openArtist(String artist, List<MusicTrack> tracks) {
@@ -190,7 +184,10 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
             border: InputBorder.none,
             suffixIcon: _query.isNotEmpty
                 ? IconButton(
-                    icon: const Icon(Icons.clear),
+                    icon: Icon(
+                      Icons.clear,
+                      color: colorScheme.onSurfaceVariant,
+                    ),
                     onPressed: () {
                       _controller.clear();
                       _onQueryChanged('');
@@ -219,6 +216,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
               artists: artists,
               albums: albums,
               playlists: playlists,
+              currentTrackId: ref.watch(currentTrackProvider)?.id,
               onTrackTap: (t) => _openTrack(t, allTracks),
               onArtistTap: _openArtist,
               onAlbumTap: _openAlbum,
