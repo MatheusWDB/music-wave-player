@@ -349,6 +349,46 @@ class MusicDatabase {
     return await db.delete(tableTracks);
   }
 
+  static const Map<String, String> _diacriticsMap = {
+    'á': 'a',
+    'à': 'a',
+    'â': 'a',
+    'ã': 'a',
+    'ä': 'a',
+    'å': 'a',
+    'é': 'e',
+    'è': 'e',
+    'ê': 'e',
+    'ë': 'e',
+    'í': 'i',
+    'ì': 'i',
+    'î': 'i',
+    'ï': 'i',
+    'ó': 'o',
+    'ò': 'o',
+    'ô': 'o',
+    'õ': 'o',
+    'ö': 'o',
+    'ú': 'u',
+    'ù': 'u',
+    'û': 'u',
+    'ü': 'u',
+    'ç': 'c',
+    'ñ': 'n',
+    'ý': 'y',
+    'ÿ': 'y',
+  };
+
+  /// Remove acentos/diacríticos para fins de comparação (ex.: "é" -> "e"),
+  /// sem alterar o texto original exibido ao usuário.
+  static String _foldDiacritics(String value) {
+    final buffer = StringBuffer();
+    for (final char in value.split('')) {
+      buffer.write(_diacriticsMap[char] ?? char);
+    }
+    return buffer.toString();
+  }
+
   static int naturalCompare(String a, String b) {
     final re = RegExp(r'\d+|\D+');
     final partsA = re.allMatches(a).map((m) => m.group(0)!).toList();
@@ -361,7 +401,7 @@ class MusicDatabase {
       final nb = int.tryParse(pb);
       final int cmp = (na != null && nb != null)
           ? na.compareTo(nb)
-          : pa.compareTo(pb);
+          : _foldDiacritics(pa).compareTo(_foldDiacritics(pb));
       if (cmp != 0) return cmp;
     }
     return partsA.length.compareTo(partsB.length);
