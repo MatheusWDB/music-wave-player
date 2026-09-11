@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 import 'package:music_wave_player/providers/music_audio_handler_provider.dart';
+import 'package:music_wave_player/providers/playback_notifier.dart';
 import 'package:music_wave_player/providers/queue_notifier.dart';
 
 part 'timer_notifier.g.dart';
@@ -105,7 +106,13 @@ class TimerNotifier extends _$TimerNotifier {
     if (state.remainingSeconds <= 1) {
       _cancelTicker();
       state = const TimerState();
-      ref.read(musicAudioHandlerProvider).pause();
+      final audioHandler = ref.read(musicAudioHandlerProvider);
+      audioHandler.pause();
+      // Pausa veio do temporizador, não do usuário: não faz sentido retomar
+      // depois de onde parou, então zera a posição salva para resume.
+      ref
+          .read(playbackNotifierProvider.notifier)
+          .saveCurrentPositionForResume(0);
       return;
     }
     state = TimerState(

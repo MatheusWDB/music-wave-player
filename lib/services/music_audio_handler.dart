@@ -281,6 +281,11 @@ class MusicAudioHandler {
       if (shouldPause) {
         _pausedAtTrackEnd = true;
         player.pause();
+        // Pausa veio do temporizador, não do usuário: zera a posição salva
+        // para resume em vez de deixar a faixa marcada como "quase no fim".
+        _ref
+            .read(playbackNotifierProvider.notifier)
+            .saveCurrentPositionForResume(0);
         return;
       }
       _ref

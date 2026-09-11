@@ -21,9 +21,23 @@ class MiniPlayerComponent extends ConsumerWidget {
     final isPlaying = ref.watch(
       playbackNotifierProvider.select((s) => s.valueOrNull?.isPlaying ?? false),
     );
+    final positionMs = ref.watch(
+      playbackNotifierProvider.select(
+        (s) => s.valueOrNull?.currentPositionMs ?? 0,
+      ),
+    );
+    final durationMs = ref.watch(
+      playbackNotifierProvider.select(
+        (s) => s.valueOrNull?.trackDurationMs ?? 0,
+      ),
+    );
     final indexedTracks =
         ref.watch(indexingNotifierProvider).valueOrNull?.indexedTracks ??
         const <MusicTrack>[];
+
+    final double progress = durationMs > 0
+        ? (positionMs / durationMs).clamp(0.0, 1.0)
+        : 0.0;
 
     return GestureDetector(
       onTap: () {
@@ -34,61 +48,83 @@ class MiniPlayerComponent extends ConsumerWidget {
           ),
         );
       },
-      child: Container(
-        height: 72.0,
-        padding: const EdgeInsets.symmetric(horizontal: 10.0, vertical: 6.0),
-        decoration: BoxDecoration(
-          color: colorScheme.surface,
-          borderRadius: BorderRadius.circular(10.0),
+      child: ClipRRect(
+        borderRadius: const BorderRadius.only(
+          topLeft: Radius.circular(16.0),
+          topRight: Radius.circular(16.0),
         ),
-        child: Row(
-          children: [
-            CoverArtWidget(
-              coverPath: currentTrack.coverPath,
-              size: 56,
-              borderRadius: BorderRadius.circular(6),
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    currentTrack.title,
-                    style: TextStyle(
-                      fontWeight: FontWeight.bold,
-                      color: colorScheme.onSurface,
-                    ),
-                    overflow: TextOverflow.ellipsis,
+        child: Container(
+          width: double.infinity,
+          decoration: BoxDecoration(color: colorScheme.surface),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              SizedBox(
+                height: 72.0,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 14.0,
+                    vertical: 6.0,
                   ),
-                  Text(
-                    currentTrack.artist,
-                    style: TextStyle(
-                      color: colorScheme.onSurfaceVariant,
-                      fontSize: 12.0,
-                    ),
-                    overflow: TextOverflow.ellipsis,
+                  child: Row(
+                    children: [
+                      CoverArtWidget(
+                        coverPath: currentTrack.coverPath,
+                        size: 56,
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              currentTrack.title,
+                              style: TextStyle(
+                                fontWeight: FontWeight.bold,
+                                color: colorScheme.onSurface,
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            Text(
+                              currentTrack.artist,
+                              style: TextStyle(
+                                color: colorScheme.onSurfaceVariant,
+                                fontSize: 12.0,
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ],
+                        ),
+                      ),
+                      MiniPlayerControls(
+                        isPlaying: isPlaying,
+                        onPrevious: () => ref
+                            .read(playbackNotifierProvider.notifier)
+                            .playPreviousTrack(indexedTracks: indexedTracks),
+                        onPlayPause: () => ref
+                            .read(playbackNotifierProvider.notifier)
+                            .togglePlayPause(
+                              indexedTracks: indexedTracks,
+                              currentTrackPath: currentTrack.path,
+                            ),
+                        onNext: () => ref
+                            .read(playbackNotifierProvider.notifier)
+                            .playNextTrack(indexedTracks: indexedTracks),
+                      ),
+                    ],
                   ),
-                ],
+                ),
               ),
-            ),
-            MiniPlayerControls(
-              isPlaying: isPlaying,
-              onPrevious: () => ref
-                  .read(playbackNotifierProvider.notifier)
-                  .playPreviousTrack(indexedTracks: indexedTracks),
-              onPlayPause: () => ref
-                  .read(playbackNotifierProvider.notifier)
-                  .togglePlayPause(
-                    indexedTracks: indexedTracks,
-                    currentTrackPath: currentTrack.path,
-                  ),
-              onNext: () => ref
-                  .read(playbackNotifierProvider.notifier)
-                  .playNextTrack(indexedTracks: indexedTracks),
-            ),
-          ],
+              LinearProgressIndicator(
+                value: progress,
+                minHeight: 2.0,
+                backgroundColor: colorScheme.onSurface.withValues(alpha: 0.08),
+                valueColor: AlwaysStoppedAnimation(colorScheme.primary),
+              ),
+            ],
+          ),
         ),
       ),
     );

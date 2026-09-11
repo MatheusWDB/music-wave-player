@@ -31,7 +31,8 @@ class ArtistsTab extends StatelessWidget {
     final artists = grouped.keys.toList();
 
     return ListView.separated(
-      padding: const EdgeInsets.only(bottom: 10.0),
+      // 150 ≈ altura do mini player + menu flutuantes (library_screen.dart).
+      padding: const EdgeInsets.only(bottom: 150.0),
       itemCount: artists.length,
       separatorBuilder: (_, __) => const SizedBox(height: 4.0),
       itemBuilder: (context, index) {

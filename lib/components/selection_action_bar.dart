@@ -23,54 +23,49 @@ class SelectionActionBar extends StatelessWidget {
     final colorScheme = Theme.of(context).colorScheme;
     final bottomInset = MediaQuery.of(context).padding.bottom;
 
-    return Positioned(
-      bottom: 0,
-      left: 0,
-      right: 0,
-      child: Container(
-        padding: EdgeInsets.fromLTRB(16, 10, 16, 10 + bottomInset),
-        decoration: BoxDecoration(
-          color: colorScheme.surface,
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.15),
-              blurRadius: 8,
-              offset: const Offset(0, -2),
+    return Container(
+      padding: EdgeInsets.fromLTRB(16, 10, 16, 10 + bottomInset),
+      decoration: BoxDecoration(
+        color: colorScheme.surface,
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.15),
+            blurRadius: 8,
+            offset: const Offset(0, -2),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          IconButton(
+            onPressed: onClear,
+            icon: Icon(Icons.close, color: colorScheme.onSurfaceVariant),
+            tooltip: 'Cancelar seleção',
+          ),
+          Expanded(
+            child: Text(
+              '$selectedCount selecionada${selectedCount == 1 ? '' : 's'}',
+              overflow: TextOverflow.ellipsis,
             ),
-          ],
-        ),
-        child: Row(
-          children: [
-            IconButton(
-              onPressed: onClear,
-              icon: Icon(Icons.close, color: colorScheme.onSurfaceVariant),
-              tooltip: 'Cancelar seleção',
-            ),
-            Expanded(
-              child: Text(
-                '$selectedCount selecionada${selectedCount == 1 ? '' : 's'}',
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
-            IconButton(
-              onPressed: onHide,
-              icon: const Icon(Icons.visibility_off_outlined),
-              tooltip: 'Ocultar',
-              color: colorScheme.onSurfaceVariant,
-            ),
-            IconButton(
-              onPressed: onFavorite,
-              icon: const Icon(Icons.favorite_border),
-              tooltip: 'Favoritar',
-              color: colorScheme.error,
-            ),
-            FilledButton.icon(
-              onPressed: onAddToPlaylist,
-              icon: const Icon(Icons.playlist_add),
-              label: const Text('Adicionar'),
-            ),
-          ],
-        ),
+          ),
+          IconButton(
+            onPressed: onHide,
+            icon: const Icon(Icons.visibility_off_outlined),
+            tooltip: 'Ocultar',
+            color: colorScheme.onSurfaceVariant,
+          ),
+          IconButton(
+            onPressed: onFavorite,
+            icon: const Icon(Icons.favorite_border),
+            tooltip: 'Favoritar',
+            color: colorScheme.error,
+          ),
+          FilledButton.icon(
+            onPressed: onAddToPlaylist,
+            icon: const Icon(Icons.playlist_add),
+            label: const Text('Adicionar'),
+          ),
+        ],
       ),
     );
   }

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:music_wave_player/components/app_menu_sheet.dart';
+import 'package:music_wave_player/components/library_bottom_nav.dart';
 import 'package:music_wave_player/components/library_top_bar.dart';
 import 'package:music_wave_player/components/mini_player_component.dart';
 import 'package:music_wave_player/components/recap_widget.dart';
@@ -18,6 +19,8 @@ class LibraryScreen extends ConsumerStatefulWidget {
 }
 
 class _LibraryScreenState extends ConsumerState<LibraryScreen> {
+  int _activeIndex = 0;
+
   @override
   void initState() {
     super.initState();
@@ -48,23 +51,43 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       body: SafeArea(
-        child: Column(
+        child: Stack(
           children: [
-            LibraryTopBar(
-              onHistoryTap: () => Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const RecentlyPlayedScreen()),
-              ),
-              onSearchTap: () => Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const SearchScreen()),
-              ),
-              onMenuTap: () => _openMenu(context),
+            Column(
+              children: [
+                LibraryTopBar(
+                  onHistoryTap: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => const RecentlyPlayedScreen(),
+                    ),
+                  ),
+                  onSearchTap: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => const SearchScreen()),
+                  ),
+                  onMenuTap: () => _openMenu(context),
+                ),
+                Expanded(child: TabsComponent(activeIndex: _activeIndex)),
+              ],
             ),
-            const Expanded(child: TabsComponent()),
-            const Padding(
-              padding: EdgeInsets.fromLTRB(8.0, 4.0, 8.0, 8.0),
-              child: MiniPlayerComponent(),
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 0,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const MiniPlayerComponent(),
+                  LibraryBottomNav(
+                    activeIndex: _activeIndex,
+                    onTap: (index) {
+                      if (index == _activeIndex) return;
+                      setState(() => _activeIndex = index);
+                    },
+                  ),
+                ],
+              ),
             ),
           ],
         ),

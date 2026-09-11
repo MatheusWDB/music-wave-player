@@ -11,17 +11,12 @@ import 'package:music_wave_player/tabs/artists_tab.dart';
 import 'package:music_wave_player/tabs/albums_tab.dart';
 import 'package:music_wave_player/tabs/playlists_tab.dart';
 
-class TabsComponent extends ConsumerStatefulWidget {
-  const TabsComponent({super.key});
+class TabsComponent extends ConsumerWidget {
+  const TabsComponent({super.key, required this.activeIndex});
 
-  @override
-  ConsumerState<TabsComponent> createState() => _TabsComponentState();
-}
-
-class _TabsComponentState extends ConsumerState<TabsComponent>
-    with TickerProviderStateMixin {
-  late final TabController _tabController;
-  int _activeMenu = 0;
+  /// Índice do destino ativo (0: Músicas, 1: Playlists, 2: Artistas,
+  /// 3: Álbuns), controlado pelo [LibraryBottomNav] no widget pai.
+  final int activeIndex;
 
   static const List<String> _tabTitles = [
     'Todas as Músicas',
@@ -54,19 +49,11 @@ class _TabsComponentState extends ConsumerState<TabsComponent>
     SortOption.artistDesc,
   ];
 
-  @override
-  void initState() {
-    super.initState();
-    _tabController = TabController(length: 4, vsync: this);
-  }
-
-  @override
-  void dispose() {
-    _tabController.dispose();
-    super.dispose();
-  }
-
-  Future<void> _onTrackTap(int trackId, List<MusicTrack> tracks) async {
+  Future<void> _onTrackTap(
+    WidgetRef ref,
+    int trackId,
+    List<MusicTrack> tracks,
+  ) async {
     final track = tracks.where((t) => t.id == trackId).firstOrNull;
     if (track == null) return;
     await ref
@@ -74,34 +61,34 @@ class _TabsComponentState extends ConsumerState<TabsComponent>
         .playTrack(trackId, indexedTracks: tracks, trackPath: track.path);
   }
 
-  Widget _buildContent(List<MusicTrack> tracks, SortState sort) {
-    switch (_activeMenu) {
+  Widget _buildContent(WidgetRef ref, List<MusicTrack> tracks, SortState sort) {
+    switch (activeIndex) {
       case 0:
         return MusicsTab(
           tracks: SortService.apply(tracks, sort.musics),
-          onTrackTap: (id) => _onTrackTap(id, tracks),
+          onTrackTap: (id) => _onTrackTap(ref, id, tracks),
         );
       case 1:
         return PlaylistsTab(sortOption: sort.playlists);
       case 2:
         return ArtistsTab(
           tracks: SortService.apply(tracks, sort.artists),
-          onTrackTap: (id) => _onTrackTap(id, tracks),
+          onTrackTap: (id) => _onTrackTap(ref, id, tracks),
         );
       case 3:
         return AlbumsTab(
           tracks: SortService.apply(tracks, sort.albums),
-          onTrackTap: (id) => _onTrackTap(id, tracks),
+          onTrackTap: (id) => _onTrackTap(ref, id, tracks),
         );
       default:
         return MusicsTab(
           tracks: tracks,
-          onTrackTap: (id) => _onTrackTap(id, tracks),
+          onTrackTap: (id) => _onTrackTap(ref, id, tracks),
         );
     }
   }
 
-  SortOption _currentSort(SortState sort) => switch (_activeMenu) {
+  SortOption _currentSort(SortState sort) => switch (activeIndex) {
     0 => sort.musics,
     1 => sort.playlists,
     2 => sort.artists,
@@ -109,7 +96,7 @@ class _TabsComponentState extends ConsumerState<TabsComponent>
     _ => sort.musics,
   };
 
-  List<SortOption> _currentOptions() => switch (_activeMenu) {
+  List<SortOption> _currentOptions() => switch (activeIndex) {
     0 => _sortOptionsMusics,
     1 => _sortOptionsPlaylists,
     2 => _sortOptionsArtists,
@@ -117,9 +104,9 @@ class _TabsComponentState extends ConsumerState<TabsComponent>
     _ => _sortOptionsMusics,
   };
 
-  void _onSortSelected(SortOption option) {
+  void _onSortSelected(WidgetRef ref, SortOption option) {
     final notifier = ref.read(sortNotifierProvider.notifier);
-    switch (_activeMenu) {
+    switch (activeIndex) {
       case 0:
         notifier.setSortMusics(option);
       case 1:
@@ -132,7 +119,7 @@ class _TabsComponentState extends ConsumerState<TabsComponent>
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final indexingState = ref.watch(indexingNotifierProvider).valueOrNull;
     final sortState = ref.watch(sortNotifierProvider).valueOrNull;
     final ColorScheme colorScheme = Theme.of(context).colorScheme;
@@ -143,57 +130,36 @@ class _TabsComponentState extends ConsumerState<TabsComponent>
 
     final tracks = indexingState.indexedTracks;
 
-    return Column(
-      children: [
-        TabBar(
-          controller: _tabController,
-          onTap: (value) {
-            if (value == _activeMenu) return;
-            setState(() => _activeMenu = value);
-          },
-          tabs: const [
-            Tab(icon: Icon(Icons.music_note_outlined), text: "Músicas"),
-            Tab(icon: Icon(Icons.library_music_outlined), text: "Playlists"),
-            Tab(icon: Icon(Icons.person_outlined), text: "Artistas"),
-            Tab(icon: Icon(Icons.album_outlined), text: "Álbuns"),
-          ],
-        ),
-        Expanded(
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 18.0),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                TabsSortHeader(
-                  title: _tabTitles[_activeMenu],
-                  currentSort: _currentSort(sortState),
-                  sortOptions: _currentOptions(),
-                  onSortSelected: _onSortSelected,
-                ),
-                tracks.isNotEmpty
-                    ? Expanded(child: _buildContent(tracks, sortState))
-                    : Expanded(
-                        child: Center(
-                          child: Padding(
-                            padding: const EdgeInsets.all(32.0),
-                            child: Text(
-                              indexingState.rootDirectory == null ||
-                                      indexingState.rootDirectory!.isEmpty
-                                  ? "Configure o Diretório Raiz primeiro para indexar suas músicas."
-                                  : "Nenhuma música encontrada. Verifique a pasta ou inicie a varredura.",
-                              textAlign: TextAlign.center,
-                              style: TextStyle(
-                                color: colorScheme.onSurfaceVariant,
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-              ],
-            ),
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 18.0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          TabsSortHeader(
+            title: _tabTitles[activeIndex],
+            currentSort: _currentSort(sortState),
+            sortOptions: _currentOptions(),
+            onSortSelected: (option) => _onSortSelected(ref, option),
           ),
-        ),
-      ],
+          tracks.isNotEmpty
+              ? Expanded(child: _buildContent(ref, tracks, sortState))
+              : Expanded(
+                  child: Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(32.0),
+                      child: Text(
+                        indexingState.rootDirectory == null ||
+                                indexingState.rootDirectory!.isEmpty
+                            ? "Configure o Diretório Raiz primeiro para indexar suas músicas."
+                            : "Nenhuma música encontrada. Verifique a pasta ou inicie a varredura.",
+                        textAlign: TextAlign.center,
+                        style: TextStyle(color: colorScheme.onSurfaceVariant),
+                      ),
+                    ),
+                  ),
+                ),
+        ],
+      ),
     );
   }
 }

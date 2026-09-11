@@ -174,6 +174,8 @@ class _PlaylistsTabState extends ConsumerState<PlaylistsTab> {
         else
           Expanded(
             child: ListView.separated(
+              // 150 ≈ altura do mini player + menu flutuantes (library_screen.dart).
+              padding: const EdgeInsets.only(bottom: 150.0),
               itemCount: sorted.length,
               separatorBuilder: (_, __) => const SizedBox(height: 8),
               itemBuilder: (context, index) {

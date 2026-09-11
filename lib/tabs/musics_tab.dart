@@ -161,7 +161,9 @@ class _MusicsTabState extends ConsumerState<MusicsTab> {
       children: [
         ListView.builder(
           controller: _scrollController,
-          padding: EdgeInsets.only(bottom: _isSelecting ? 80 : 10),
+          // 150 ≈ altura do mini player + menu flutuantes (library_screen.dart),
+          // pra última música não ficar permanentemente escondida atrás deles.
+          padding: EdgeInsets.only(bottom: _isSelecting ? 220 : 150),
           itemCount: widget.tracks.length,
           itemExtent: MusicTrackTile.itemExtent,
           itemBuilder: (context, index) {
@@ -201,12 +203,17 @@ class _MusicsTabState extends ConsumerState<MusicsTab> {
           },
         ),
         if (_isSelecting)
-          SelectionActionBar(
-            selectedCount: _selected.length,
-            onClear: _clearSelection,
-            onHide: _hideSelected,
-            onFavorite: _favoriteSelected,
-            onAddToPlaylist: _addSelectedToPlaylist,
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: 150,
+            child: SelectionActionBar(
+              selectedCount: _selected.length,
+              onClear: _clearSelection,
+              onHide: _hideSelected,
+              onFavorite: _favoriteSelected,
+              onAddToPlaylist: _addSelectedToPlaylist,
+            ),
           ),
       ],
     );
