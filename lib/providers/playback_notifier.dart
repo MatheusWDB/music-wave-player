@@ -1,3 +1,4 @@
+import 'package:flutter/material.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:music_wave_player/models/music_track.dart';
@@ -270,10 +271,12 @@ class PlaybackNotifier extends _$PlaybackNotifier {
     if (current == null) return;
 
     int next = queueState.currentQueueIndex + 1;
+    
     if (next >= queue.length) {
       if (current.repeatMode == 'All') {
         next = 0;
       } else {
+        
         ref.read(musicAudioHandlerProvider).pause();
         return;
       }

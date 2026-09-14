@@ -339,6 +339,24 @@ class IndexingNotifier extends _$IndexingNotifier {
     state = AsyncData(current.copyWith(indexedTracks: tracks));
   }
 
+  /// Corrige a duração de uma faixa já indexada (ver [MusicAudioHandler],
+  /// tratamento de "completed" fora do near-end). Atualiza banco e a lista
+  /// em memória, sem precisar reiniciar o app pra refletir o valor certo.
+  Future<void> updateTrackDuration(int trackId, int durationMs) async {
+    final current = state.valueOrNull;
+    if (current == null) return;
+    final idx = current.indexedTracks.indexWhere((t) => t.id == trackId);
+    if (idx == -1) return;
+
+    final updated = await TrackRepository.updateDuration(
+      current.indexedTracks[idx],
+      durationMs,
+    );
+    final tracks = List.of(current.indexedTracks);
+    tracks[idx] = updated;
+    state = AsyncData(current.copyWith(indexedTracks: tracks));
+  }
+
   // ── Edição de metadados ───────────────────────────────────────────────────
 
   /// Edita os metadados de uma faixa. Retorna o resultado diretamente

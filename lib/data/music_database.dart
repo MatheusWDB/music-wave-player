@@ -300,6 +300,19 @@ class MusicDatabase {
     );
   }
 
+  /// Corrige a duração salva quando o decoder para antes do fim declarado
+  /// pelo container (ver filtro de "completed" espúrio em
+  /// [MusicAudioHandler]). Não marca a faixa como editada pelo usuário.
+  Future<void> updateDuration(int id, int durationMs) async {
+    final db = await instance.database;
+    await db.update(
+      tableTracks,
+      {columnDurationMs: durationMs},
+      where: '$columnId = ?',
+      whereArgs: [id],
+    );
+  }
+
   /// Atualiza título/artista/álbum sem marcar a faixa como editada pelo
   /// usuário. Usado pelo [MetadataRepairService] para corrigir metadados
   /// extraídos incorretamente (ex: bug de acentuação), preservando a

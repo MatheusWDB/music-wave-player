@@ -19,6 +19,9 @@ class MusicAudioHandler {
   // ── Crossfade / fade ──────────────────────────────────────────────────────
   int _crossfadeDuration = 0;
   bool _fadeOnPauseResume = false;
+  // Usado para diferenciar um "completed" espúrio (residual logo após
+  // open()) de um fim real que ocorre longe do início da faixa.
+  DateTime? _currentTrackLoadedAt;
 
   Timer? _crossfadeTimer;
   bool _crossfadeInProgress = false;
@@ -265,15 +268,45 @@ class MusicAudioHandler {
     // com fone Bluetooth conectado). O filtro contra o "completed"
     // residual pós-open() continua válido: nesse caso a diferença entre
     // posição e duração é da ordem de segundos inteiros, não milissegundos.
-    _completedSub = player.stream.completed.listen((completed) {
+    _completedSub = player.stream.completed.listen((completed) async {
       if (!completed) return;
 
       final duration = player.state.duration;
       final position = player.state.position;
-      final isNearEnd =
-          duration > Duration.zero &&
-          (duration - position).inMilliseconds <= 3000;
-      if (!isNearEnd) return;
+      final gapMs = (duration - position).inMilliseconds;
+      final isNearEnd = duration > Duration.zero && gapMs <= 3000;
+      
+
+      if (!isNearEnd) {
+        // Gap grande: pode ser um "completed" residual pós-open() (ver
+        // comentário acima) OU o decoder ter genuinamente parado antes do
+        // fim declarado pelo container, mesmo com metadados corretos
+        // (observado com arquivos específicos — ver Bug "Haunted").
+        //
+        // Não dá pra confiar em reconferir player.state.position depois de
+        // esperar: ao entrar em estado de "completed", o mpv já reporta a
+        // posição igual à duração total, mesmo sem a faixa ter de fato
+        // continuado tocando — isso mascarava o travamento real.
+        //
+        // Sinal mais confiável: o "completed" espúrio documentado ocorre
+        // logo após abrir a faixa (resíduo da faixa anterior). Se já
+        // estamos tocando a faixa atual há um tempo bom, esse completed é
+        // real mesmo com gap grande.
+        final elapsedSinceLoad = _currentTrackLoadedAt == null
+            ? Duration.zero
+            : DateTime.now().difference(_currentTrackLoadedAt!);
+        final looksSpurious = elapsedSinceLoad < const Duration(seconds: 3);
+        
+        if (looksSpurious) return;
+
+        final track = _ref.read(currentTrackProvider);
+        if (track?.id != null) {
+          
+          await _ref
+              .read(indexingNotifierProvider.notifier)
+              .updateTrackDuration(track!.id!, position.inMilliseconds);
+        }
+      }
 
       final shouldPause = _ref
           .read(timerNotifierProvider.notifier)
@@ -359,6 +392,7 @@ class MusicAudioHandler {
     });
 
     await player.open(Media(uri), play: false);
+    _currentTrackLoadedAt = DateTime.now();
 
     await completer.future.timeout(
       const Duration(seconds: 5),

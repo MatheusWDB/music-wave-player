@@ -40,6 +40,17 @@ class TrackRepository {
     return track.copyWith(rating: rating);
   }
 
+  /// Corrige a duração salva quando o decoder para antes do fim declarado
+  /// pelo container (ver filtro de "completed" espúrio em
+  /// [MusicAudioHandler]).
+  static Future<MusicTrack> updateDuration(
+    MusicTrack track,
+    int durationMs,
+  ) async {
+    await MusicDatabase.instance.updateDuration(track.id!, durationMs);
+    return track.copyWith(durationMs: durationMs);
+  }
+
   // ── Ocultar / Reexibir ────────────────────────────────────────────────────
 
   static Future<void> hideTracks(List<int> ids) async {
