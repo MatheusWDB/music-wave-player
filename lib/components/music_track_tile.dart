@@ -27,6 +27,7 @@ class MusicTrackTile extends StatelessWidget {
   final VoidCallback onInsertNext;
   final VoidCallback onAddToEnd;
   final VoidCallback onHide;
+  final VoidCallback onRecalculateSilence;
 
   const MusicTrackTile({
     super.key,
@@ -41,6 +42,7 @@ class MusicTrackTile extends StatelessWidget {
     required this.onInsertNext,
     required this.onAddToEnd,
     required this.onHide,
+    required this.onRecalculateSilence,
     this.isCurrentTrack = false,
   });
 
@@ -123,6 +125,7 @@ class MusicTrackTile extends StatelessWidget {
                     onInsertNext: onInsertNext,
                     onAddToEnd: onAddToEnd,
                     onHide: onHide,
+                    onRecalculateSilence: onRecalculateSilence,
                   ),
                 ),
             ],

@@ -21,6 +21,7 @@ class MusicDatabase {
   static const String columnRating = 'rating';
   static const String columnAddedAt = 'added_at';
   static const String columnLoudnessLufs = 'loudness_lufs';
+  static const String columnEffectiveEndMs = 'effective_end_ms';
 
   Future<Database> get database async {
     if (_database != null) return _database!;
@@ -33,7 +34,7 @@ class MusicDatabase {
     final path = join(dbPath, filePath);
     return await openDatabase(
       path,
-      version: 8,
+      version: 9,
       onCreate: _createDB,
       onUpgrade: _upgradeDB,
     );
@@ -53,7 +54,8 @@ class MusicDatabase {
         $columnIsHidden   INTEGER NOT NULL DEFAULT 0,
         $columnRating     REAL NOT NULL DEFAULT 0,
         $columnAddedAt       TEXT,
-        $columnLoudnessLufs  REAL
+        $columnLoudnessLufs  REAL,
+        $columnEffectiveEndMs INTEGER
       )
     ''');
   }
@@ -95,6 +97,11 @@ class MusicDatabase {
     if (oldVersion < 8) {
       await db.execute(
         'ALTER TABLE $tableTracks ADD COLUMN $columnLoudnessLufs REAL',
+      );
+    }
+    if (oldVersion < 9) {
+      await db.execute(
+        'ALTER TABLE $tableTracks ADD COLUMN $columnEffectiveEndMs INTEGER',
       );
     }
   }
@@ -308,6 +315,32 @@ class MusicDatabase {
     await db.update(
       tableTracks,
       {columnDurationMs: durationMs},
+      where: '$columnId = ?',
+      whereArgs: [id],
+    );
+  }
+
+  /// Salva o "fim efetivo" da faixa (ponto em que o conteúdo de áudio
+  /// real termina, antes de um silêncio final longo) detectado pelo
+  /// [SilenceDetectionService]. Usa o próprio durationMs quando não há
+  /// silêncio relevante, só para marcar a faixa como já analisada.
+  Future<void> updateEffectiveEndMs(int id, int effectiveEndMs) async {
+    final db = await instance.database;
+    await db.update(
+      tableTracks,
+      {columnEffectiveEndMs: effectiveEndMs},
+      where: '$columnId = ?',
+      whereArgs: [id],
+    );
+  }
+
+  /// Limpa o fim efetivo salvo, forçando o [SilenceDetectionService] a
+  /// reanalisar a faixa na próxima reprodução.
+  Future<void> clearEffectiveEndMs(int id) async {
+    final db = await instance.database;
+    await db.update(
+      tableTracks,
+      {columnEffectiveEndMs: null},
       where: '$columnId = ?',
       whereArgs: [id],
     );

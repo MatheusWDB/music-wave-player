@@ -357,6 +357,38 @@ class IndexingNotifier extends _$IndexingNotifier {
     state = AsyncData(current.copyWith(indexedTracks: tracks));
   }
 
+  /// Salva o resultado do [SilenceDetectionService] e atualiza a lista em
+  /// memória, sem precisar reiniciar o app.
+  Future<void> updateTrackEffectiveEnd(int trackId, int effectiveEndMs) async {
+    final current = state.valueOrNull;
+    if (current == null) return;
+    final idx = current.indexedTracks.indexWhere((t) => t.id == trackId);
+    if (idx == -1) return;
+
+    final updated = await TrackRepository.updateEffectiveEndMs(
+      current.indexedTracks[idx],
+      effectiveEndMs,
+    );
+    final tracks = List.of(current.indexedTracks);
+    tracks[idx] = updated;
+    state = AsyncData(current.copyWith(indexedTracks: tracks));
+  }
+
+  /// Força a reanálise de silêncio na próxima reprodução da faixa.
+  Future<void> clearTrackEffectiveEnd(int trackId) async {
+    final current = state.valueOrNull;
+    if (current == null) return;
+    final idx = current.indexedTracks.indexWhere((t) => t.id == trackId);
+    if (idx == -1) return;
+
+    final updated = await TrackRepository.clearEffectiveEndMs(
+      current.indexedTracks[idx],
+    );
+    final tracks = List.of(current.indexedTracks);
+    tracks[idx] = updated;
+    state = AsyncData(current.copyWith(indexedTracks: tracks));
+  }
+
   // ── Edição de metadados ───────────────────────────────────────────────────
 
   /// Edita os metadados de uma faixa. Retorna o resultado diretamente

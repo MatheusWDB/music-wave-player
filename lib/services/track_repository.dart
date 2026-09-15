@@ -51,6 +51,24 @@ class TrackRepository {
     return track.copyWith(durationMs: durationMs);
   }
 
+  /// Salva o resultado do [SilenceDetectionService] para a faixa.
+  static Future<MusicTrack> updateEffectiveEndMs(
+    MusicTrack track,
+    int effectiveEndMs,
+  ) async {
+    await MusicDatabase.instance.updateEffectiveEndMs(
+      track.id!,
+      effectiveEndMs,
+    );
+    return track.copyWith(effectiveEndMs: effectiveEndMs);
+  }
+
+  /// Força a reanálise de silêncio na próxima reprodução da faixa.
+  static Future<MusicTrack> clearEffectiveEndMs(MusicTrack track) async {
+    await MusicDatabase.instance.clearEffectiveEndMs(track.id!);
+    return track.copyWith(clearEffectiveEndMs: true);
+  }
+
   // ── Ocultar / Reexibir ────────────────────────────────────────────────────
 
   static Future<void> hideTracks(List<int> ids) async {

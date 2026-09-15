@@ -6,7 +6,7 @@ part of 'indexing_notifier.dart';
 // RiverpodGenerator
 // **************************************************************************
 
-String _$indexingNotifierHash() => r'58219e79df4363838184bc438e9b0c2a4335748a';
+String _$indexingNotifierHash() => r'68becc2531274c99a57a3ff5fc033f8b28c35fa7';
 
 /// Gerencia a biblioteca de faixas indexadas: diretório raiz, varredura,
 /// ocultar/reexibir, avaliação e edição de metadados. Substitui a parte

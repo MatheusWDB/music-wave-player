@@ -10,6 +10,7 @@ import 'package:music_wave_player/providers/indexing_notifier.dart';
 import 'package:music_wave_player/providers/playback_notifier.dart';
 import 'package:music_wave_player/providers/player_settings_notifier.dart';
 import 'package:music_wave_player/providers/timer_notifier.dart';
+import 'package:music_wave_player/services/silence_detection_service.dart';
 
 class MusicAudioHandler {
   final Ref _ref;
@@ -22,6 +23,8 @@ class MusicAudioHandler {
   // Usado para diferenciar um "completed" espúrio (residual logo após
   // open()) de um fim real que ocorre longe do início da faixa.
   DateTime? _currentTrackLoadedAt;
+  // Evita disparar o avanço por effectiveEndMs mais de uma vez por faixa.
+  bool _effectiveEndTriggered = false;
 
   Timer? _crossfadeTimer;
   bool _crossfadeInProgress = false;
@@ -229,6 +232,23 @@ class MusicAudioHandler {
           }
         }
       }
+
+      // Se o SilenceDetectionService já identificou onde o conteúdo de
+      // áudio real termina (silêncio final longo, ex: "Haunted"), avança
+      // direto nesse ponto — sem depender do "completed" nativo do mpv
+      // nem tocar o silêncio até o fim.
+      if (!_effectiveEndTriggered) {
+        final effectiveEndMs = _ref.read(currentTrackProvider)?.effectiveEndMs;
+        final durationMs = player.state.duration.inMilliseconds;
+        if (effectiveEndMs != null &&
+            effectiveEndMs < durationMs - 1000 &&
+            pos.inMilliseconds >= effectiveEndMs) {
+          _effectiveEndTriggered = true;
+          // Corte abrupto no ponto exato soa estranho (ex: cauda de
+          // reverb ainda decaindo). Um fade curto disfarça a transição.
+          unawaited(_fadeOut(2).then((_) => _finishTrack()));
+        }
+      }
     });
 
     _durationSub = player.stream.duration.listen((dur) {
@@ -275,7 +295,6 @@ class MusicAudioHandler {
       final position = player.state.position;
       final gapMs = (duration - position).inMilliseconds;
       final isNearEnd = duration > Duration.zero && gapMs <= 3000;
-      
 
       if (!isNearEnd) {
         // Gap grande: pode ser um "completed" residual pós-open() (ver
@@ -296,34 +315,14 @@ class MusicAudioHandler {
             ? Duration.zero
             : DateTime.now().difference(_currentTrackLoadedAt!);
         final looksSpurious = elapsedSinceLoad < const Duration(seconds: 3);
-        
         if (looksSpurious) return;
-
-        final track = _ref.read(currentTrackProvider);
-        if (track?.id != null) {
-          
-          await _ref
-              .read(indexingNotifierProvider.notifier)
-              .updateTrackDuration(track!.id!, position.inMilliseconds);
-        }
+        // Tratado como fim real. Não mexe mais em durationMs aqui — isso
+        // corrompia a duração de verdade do arquivo com o ponto onde o
+        // decoder parou. Quem cuida de identificar/pular esse tipo de
+        // situação agora é o SilenceDetectionService (effectiveEndMs).
       }
 
-      final shouldPause = _ref
-          .read(timerNotifierProvider.notifier)
-          .onTrackFinished();
-      if (shouldPause) {
-        _pausedAtTrackEnd = true;
-        player.pause();
-        // Pausa veio do temporizador, não do usuário: zera a posição salva
-        // para resume em vez de deixar a faixa marcada como "quase no fim".
-        _ref
-            .read(playbackNotifierProvider.notifier)
-            .saveCurrentPositionForResume(0);
-        return;
-      }
-      _ref
-          .read(playbackNotifierProvider.notifier)
-          .trackDidFinish(indexedTracks: _indexedTracks);
+      _finishTrack();
     });
 
     _mediaCommandSub = player.stream.mediaSessionCommands.listen((command) {
@@ -360,6 +359,28 @@ class MusicAudioHandler {
     });
   }
 
+  /// Avança para a próxima faixa (ou pausa, se o temporizador determinou
+  /// isso ao chegar no fim). Compartilhado entre o "completed" nativo do
+  /// mpv e o gatilho de effectiveEndMs (silêncio final detectado).
+  void _finishTrack() {
+    final shouldPause = _ref
+        .read(timerNotifierProvider.notifier)
+        .onTrackFinished();
+    if (shouldPause) {
+      _pausedAtTrackEnd = true;
+      player.pause();
+      // Pausa veio do temporizador, não do usuário: zera a posição salva
+      // para resume em vez de deixar a faixa marcada como "quase no fim".
+      _ref
+          .read(playbackNotifierProvider.notifier)
+          .saveCurrentPositionForResume(0);
+      return;
+    }
+    _ref
+        .read(playbackNotifierProvider.notifier)
+        .trackDidFinish(indexedTracks: _indexedTracks);
+  }
+
   /// Atalho para a lista de faixas indexadas, usada pelos métodos que
   /// delegam navegação de fila ao [PlaybackNotifier].
   List<MusicTrack> get _indexedTracks =>
@@ -370,6 +391,7 @@ class MusicAudioHandler {
 
   Future<void> loadTrack(String path) async {
     _pausedAtTrackEnd = false;
+    _effectiveEndTriggered = false;
     // Cancela qualquer fade em andamento e reseta flags para a nova faixa
     _crossfadeTimer?.cancel();
     _crossfadeInProgress = false;
@@ -425,11 +447,50 @@ class MusicAudioHandler {
 
     await _applyLoudnessGain();
 
+    // Analisa silêncio final em background (não bloqueia a reprodução) —
+    // só roda uma vez por faixa; o resultado fica salvo pra sempre.
+    unawaited(_analyzeSilenceIfNeeded());
+
     // Prepara volume 0 se crossfade ativo — o fade in acontece no play()
     if (_crossfadeDuration > 0) {
       await player.setVolume(0);
     } else {
       await player.setVolume(_baseVolume);
+    }
+  }
+
+  /// Detecta silêncio final longo (ver [SilenceDetectionService]) para a
+  /// faixa atual, se ainda não tiver sido analisada. Roda em paralelo à
+  /// reprodução, sem bloquear nada — o resultado é salvo assim que pronto
+  /// e passa a valer imediatamente, mesmo na primeira reprodução da faixa,
+  /// se a análise terminar antes da faixa acabar.
+  Future<void> _analyzeSilenceIfNeeded() async {
+    final track = _ref.read(currentTrackProvider);
+    if (track == null || track.id == null) return;
+    if (track.effectiveEndMs != null) return; // já analisada
+
+    // Usa a duração real reportada pelo mpv (confirmada por ffprobe),
+    // não o valor salvo no banco — evita repetir análise sobre um
+    // durationMs eventualmente desatualizado.
+    final liveDurationMs = player.state.duration.inMilliseconds;
+    if (liveDurationMs <= 0) return;
+
+    final effectiveEndMs = await SilenceDetectionService.detectEffectiveEnd(
+      path: track.path,
+      durationMs: liveDurationMs,
+    );
+    await _ref
+        .read(indexingNotifierProvider.notifier)
+        .updateTrackEffectiveEnd(track.id!, effectiveEndMs);
+
+    // Efeito colateral útil: se durationMs salvo estava desatualizado
+    // (ex: corrompido por uma correção antiga baseada no "completed"
+    // nativo), corrige aqui também, já que a duração real acabou de ser
+    // confirmada.
+    if ((track.durationMs - liveDurationMs).abs() > 1000) {
+      await _ref
+          .read(indexingNotifierProvider.notifier)
+          .updateTrackDuration(track.id!, liveDurationMs);
     }
   }
 

@@ -13,6 +13,10 @@ class MusicTrack {
   final double rating;
   final DateTime? addedAt;
   final double? loudnessLufs;
+  // Ponto (ms) em que o conteúdo de áudio real termina, antes de um
+  // silêncio final longo (ver SilenceDetectionService). Nulo = ainda não
+  // analisada. Igual a durationMs = analisada, sem silêncio relevante.
+  final int? effectiveEndMs;
 
   static const List<String> supportedExtensions = [
     '.mp3',
@@ -35,6 +39,7 @@ class MusicTrack {
     this.rating = 0,
     this.addedAt,
     this.loudnessLufs,
+    this.effectiveEndMs,
   });
 
   MusicTrack copyWith({
@@ -51,6 +56,8 @@ class MusicTrack {
     double? rating,
     DateTime? addedAt,
     double? loudnessLufs,
+    int? effectiveEndMs,
+    bool clearEffectiveEndMs = false,
   }) {
     return MusicTrack(
       id: id ?? this.id,
@@ -65,6 +72,9 @@ class MusicTrack {
       rating: rating ?? this.rating,
       addedAt: addedAt ?? this.addedAt,
       loudnessLufs: loudnessLufs ?? this.loudnessLufs,
+      effectiveEndMs: clearEffectiveEndMs
+          ? null
+          : (effectiveEndMs ?? this.effectiveEndMs),
     );
   }
 
@@ -85,6 +95,7 @@ class MusicTrack {
     MusicDatabase.columnRating: rating,
     MusicDatabase.columnAddedAt: addedAt?.toIso8601String(),
     MusicDatabase.columnLoudnessLufs: loudnessLufs,
+    MusicDatabase.columnEffectiveEndMs: effectiveEndMs,
   };
 
   static MusicTrack fromMap(Map<String, Object?> map) => MusicTrack(
@@ -102,6 +113,7 @@ class MusicTrack {
         ? DateTime.tryParse(map[MusicDatabase.columnAddedAt] as String)
         : null,
     loudnessLufs: (map[MusicDatabase.columnLoudnessLufs] as num?)?.toDouble(),
+    effectiveEndMs: map[MusicDatabase.columnEffectiveEndMs] as int?,
   );
 
   @override
@@ -110,5 +122,5 @@ class MusicTrack {
       'artist: $artist, album: $album, isEdited: $isEdited, '
       'isHidden: $isHidden, rating: $rating, coverPath: $coverPath, '
       'durationMs: $durationMs, addedAt: $addedAt, '
-      'loudnessLufs: $loudnessLufs}';
+      'loudnessLufs: $loudnessLufs, effectiveEndMs: $effectiveEndMs}';
 }

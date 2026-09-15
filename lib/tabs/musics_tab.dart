@@ -199,6 +199,17 @@ class _MusicsTabState extends ConsumerState<MusicsTab> {
                   );
                 }
               },
+              onRecalculateSilence: () async {
+                await indexingNotifier.clearTrackEffectiveEnd(track.id!);
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Será reanalisada na próxima reprodução.'),
+                      behavior: SnackBarBehavior.floating,
+                    ),
+                  );
+                }
+              },
             );
           },
         ),

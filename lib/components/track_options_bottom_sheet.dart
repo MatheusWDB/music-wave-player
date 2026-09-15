@@ -16,6 +16,7 @@ class TrackOptionsBottomSheet extends StatefulWidget {
   final VoidCallback onInsertNext;
   final VoidCallback onAddToEnd;
   final VoidCallback onHide;
+  final VoidCallback onRecalculateSilence;
 
   const TrackOptionsBottomSheet._({
     required this.track,
@@ -25,6 +26,7 @@ class TrackOptionsBottomSheet extends StatefulWidget {
     required this.onInsertNext,
     required this.onAddToEnd,
     required this.onHide,
+    required this.onRecalculateSilence,
   });
 
   static void show(
@@ -36,6 +38,7 @@ class TrackOptionsBottomSheet extends StatefulWidget {
     required VoidCallback onInsertNext,
     required VoidCallback onAddToEnd,
     required VoidCallback onHide,
+    required VoidCallback onRecalculateSilence,
   }) {
     showModalBottomSheet(
       context: context,
@@ -49,6 +52,7 @@ class TrackOptionsBottomSheet extends StatefulWidget {
         onInsertNext: onInsertNext,
         onAddToEnd: onAddToEnd,
         onHide: onHide,
+        onRecalculateSilence: onRecalculateSilence,
       ),
     );
   }
@@ -173,6 +177,11 @@ class _TrackOptionsBottomSheetState extends State<TrackOptionsBottomSheet> {
             icon: Icons.visibility_off_outlined,
             label: 'Ocultar',
             onTap: () => _select(widget.onHide),
+          ),
+          _TrackOption(
+            icon: Icons.graphic_eq_outlined,
+            label: 'Recalcular fim de silêncio',
+            onTap: () => _select(widget.onRecalculateSilence),
           ),
         ];
 

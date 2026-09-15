@@ -270,12 +270,10 @@ class PlaybackNotifier extends _$PlaybackNotifier {
     if (current == null) return;
 
     int next = queueState.currentQueueIndex + 1;
-    
     if (next >= queue.length) {
       if (current.repeatMode == 'All') {
         next = 0;
       } else {
-        
         ref.read(musicAudioHandlerProvider).pause();
         return;
       }
