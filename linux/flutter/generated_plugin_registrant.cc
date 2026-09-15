@@ -6,11 +6,15 @@
 
 #include "generated_plugin_registrant.h"
 
+#include <ffmpeg_kit_flutter_new/f_fmpeg_kit_flutter_plugin.h>
 #include <file_saver/file_saver_plugin.h>
 #include <mpv_audio_kit/mpv_audio_kit_plugin.h>
 #include <url_launcher_linux/url_launcher_plugin.h>
 
 void fl_register_plugins(FlPluginRegistry* registry) {
+  g_autoptr(FlPluginRegistrar) ffmpeg_kit_flutter_new_registrar =
+      fl_plugin_registry_get_registrar_for_plugin(registry, "FFmpegKitFlutterPlugin");
+  f_fmpeg_kit_flutter_plugin_register_with_registrar(ffmpeg_kit_flutter_new_registrar);
   g_autoptr(FlPluginRegistrar) file_saver_registrar =
       fl_plugin_registry_get_registrar_for_plugin(registry, "FileSaverPlugin");
   file_saver_plugin_register_with_registrar(file_saver_registrar);
