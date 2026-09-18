@@ -120,7 +120,17 @@ class _QueueBottomSheetState extends ConsumerState<QueueBottomSheet> {
     final colorScheme = Theme.of(context).colorScheme;
 
     final queueState = ref.watch(queueNotifierProvider);
-    final playbackState = ref.watch(playbackNotifierProvider).valueOrNull;
+    final isPlaying = ref.watch(
+      playbackNotifierProvider.select((s) => s.valueOrNull?.isPlaying ?? false),
+    );
+    final isShuffleActive = ref.watch(
+      playbackNotifierProvider.select(
+        (s) => s.valueOrNull?.isShuffleActive ?? false,
+      ),
+    );
+    final lastPlayedMusicId = ref.watch(
+      playbackNotifierProvider.select((s) => s.valueOrNull?.lastPlayedMusicId),
+    );
     final indexedTracks =
         ref.watch(indexingNotifierProvider).valueOrNull?.indexedTracks ??
         const <MusicTrack>[];
@@ -128,10 +138,9 @@ class _QueueBottomSheetState extends ConsumerState<QueueBottomSheet> {
 
     final fullQueue = queueState.playbackQueue;
     final currentIndex = queueState.currentQueueIndex;
-    final isPlaying = playbackState?.isPlaying ?? false;
 
-    MusicTrack? trackById(int id) =>
-        indexedTracks.where((t) => t.id == id).firstOrNull;
+    final tracksById = {for (final t in indexedTracks) t.id: t};
+    MusicTrack? trackById(int id) => tracksById[id];
 
     final currentTrack = currentIndex >= 0 && currentIndex < fullQueue.length
         ? trackById(fullQueue[currentIndex])
@@ -162,7 +171,7 @@ class _QueueBottomSheetState extends ConsumerState<QueueBottomSheet> {
                 case 'save':
                   _saveQueueAsPlaylist(context, fullQueue);
                 case 'clear':
-                  _confirmClearQueue(context, playbackState?.lastPlayedMusicId);
+                  _confirmClearQueue(context, lastPlayedMusicId);
               }
             },
             itemBuilder: (_) => const [
@@ -226,7 +235,7 @@ class _QueueBottomSheetState extends ConsumerState<QueueBottomSheet> {
                       .reorder(
                         realIndexOf(oldIndex),
                         realIndexOf(newIndex),
-                        playbackState?.lastPlayedMusicId,
+                        lastPlayedMusicId,
                       );
                 },
                 onDismiss: (index) => ref
@@ -261,21 +270,21 @@ class _QueueBottomSheetState extends ConsumerState<QueueBottomSheet> {
                       icon: Icon(
                         Icons.shuffle,
                         size: 18,
-                        color: (playbackState?.isShuffleActive ?? false)
+                        color: isShuffleActive
                             ? colorScheme.primary
                             : colorScheme.onSurfaceVariant,
                       ),
                       label: Text(
                         'Ordem aleatória',
                         style: TextStyle(
-                          color: (playbackState?.isShuffleActive ?? false)
+                          color: isShuffleActive
                               ? colorScheme.primary
                               : colorScheme.onSurfaceVariant,
                         ),
                       ),
                       style: OutlinedButton.styleFrom(
                         side: BorderSide(
-                          color: (playbackState?.isShuffleActive ?? false)
+                          color: isShuffleActive
                               ? colorScheme.primary
                               : colorScheme.outlineVariant,
                         ),
