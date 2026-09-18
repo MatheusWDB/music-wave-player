@@ -138,7 +138,7 @@ class _BackupRestoreScreenState extends ConsumerState<BackupRestoreScreen> {
 
     AppMessenger.show(
       'Restauração concluída: ${summary.playlistsRestored} playlist${summary.playlistsRestored == 1 ? '' : 's'}, '
-      '${summary.tracksRecreated} faixa${summary.tracksRecreated == 1 ? '' : 's'} recriada${summary.tracksRecreated == 1 ? '' : 's'}, '
+      '${summary.tracksIndexed} faixa${summary.tracksIndexed == 1 ? '' : 's'} nova${summary.tracksIndexed == 1 ? '' : 's'}, '
       '${summary.sessionsRestored} ${summary.sessionsRestored == 1 ? 'sessão' : 'sessões'}.',
     );
 
@@ -156,7 +156,7 @@ class _BackupRestoreScreenState extends ConsumerState<BackupRestoreScreen> {
           'Este backup contém ${data.playlists.length} playlist${data.playlists.length == 1 ? '' : 's'}, '
           '${data.trackMeta.length} música${data.trackMeta.length == 1 ? '' : 's'} com nota/oculta e '
           '${data.playSessions.length} ${data.playSessions.length == 1 ? 'sessão' : 'sessões'} de reprodução.\n\n'
-          'Faixas que sumiram da biblioteca serão recriadas automaticamente, se o arquivo ainda existir no mesmo local. '
+          'A biblioteca será reindexada a partir da pasta salva no backup antes de aplicar esses dados. '
           'Os dados são mesclados com os já existentes. Deseja continuar?',
         ),
         actions: [
@@ -180,7 +180,7 @@ class _BackupRestoreScreenState extends ConsumerState<BackupRestoreScreen> {
         title: const Text('Restauração concluída'),
         content: Text(
           '${summary.playlistsRestored} playlist${summary.playlistsRestored == 1 ? '' : 's'} restaurada${summary.playlistsRestored == 1 ? '' : 's'}.\n'
-          '${summary.tracksRecreated} faixa${summary.tracksRecreated == 1 ? '' : 's'} recriada${summary.tracksRecreated == 1 ? '' : 's'} a partir do backup.\n'
+          '${summary.tracksIndexed} faixa${summary.tracksIndexed == 1 ? '' : 's'} nova${summary.tracksIndexed == 1 ? '' : 's'} indexada${summary.tracksIndexed == 1 ? '' : 's'} da pasta de música.\n'
           '${summary.trackMetaMatched} música${summary.trackMetaMatched == 1 ? '' : 's'} com nota/oculta aplicada'
           '${summary.trackMetaMatched == 1 ? '' : 's'}'
           '${summary.trackMetaUnmatched > 0 ? ' (${summary.trackMetaUnmatched} não encontrada${summary.trackMetaUnmatched == 1 ? '' : 's'})' : ''}.\n'

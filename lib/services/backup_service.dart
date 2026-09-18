@@ -1,8 +1,6 @@
-import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
 
-import 'package:mpv_audio_kit/mpv_audio_kit.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:music_wave_player/data/music_database.dart';
 import 'package:music_wave_player/data/play_session_database.dart';
@@ -12,10 +10,9 @@ import 'package:music_wave_player/providers/equalizer_notifier.dart';
 import 'package:music_wave_player/providers/indexing_notifier.dart';
 import 'package:music_wave_player/providers/player_settings_notifier.dart';
 import 'package:music_wave_player/providers/sort_notifier.dart';
-import 'package:music_wave_player/services/cover_art_service.dart';
 import 'package:music_wave_player/services/equalizer_service.dart';
-import 'package:music_wave_player/services/metadata_parser.dart';
 import 'package:music_wave_player/services/sort_service.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 const String _kBackupFormat = 'MWP_BACKUP';
 const int _kBackupVersion = 1;
@@ -103,10 +100,29 @@ class BackupData {
   });
 }
 
+/// Progresso de uma etapa do restore (avaliações/ocultas, playlists ou
+/// sessões), para exibição em tempo real — evita a sensação de app
+/// travado em bibliotecas grandes, já que o restore roda desacoplado da
+/// tela.
+class RestoreProgress {
+  final String stage;
+  final int done;
+  final int total;
+  final int stageIndex;
+  final int stageTotal;
+  const RestoreProgress({
+    required this.stage,
+    required this.done,
+    required this.total,
+    required this.stageIndex,
+    required this.stageTotal,
+  });
+}
+
 /// Resumo do resultado de uma restauração, exibido ao usuário.
 class RestoreSummary {
   final int playlistsRestored;
-  final int tracksRecreated;
+  final int tracksIndexed;
   final int trackMetaMatched;
   final int trackMetaUnmatched;
   final int sessionsRestored;
@@ -114,7 +130,7 @@ class RestoreSummary {
 
   const RestoreSummary({
     required this.playlistsRestored,
-    required this.tracksRecreated,
+    required this.tracksIndexed,
     required this.trackMetaMatched,
     required this.trackMetaUnmatched,
     required this.sessionsRestored,
@@ -127,14 +143,32 @@ class RestoreSummary {
 /// Faixas são referenciadas no arquivo por [path, title, artist] para
 /// sobreviver à reindexação em outro diretório ou aparelho: a busca tenta
 /// path exato primeiro e cai para título+artista (case-insensitive) se
-/// não encontrar. Se a faixa sumiu do banco mas o arquivo ainda existe no
-/// path salvo, ela é recriada automaticamente antes do merge.
+/// não encontrar. O restore reindexa a biblioteca inteira a partir do
+/// diretório raiz salvo no backup antes de aplicar ratings, ocultas,
+/// playlists e sessões — não depende mais de recriar faixas pontuais.
 ///
 /// Recebe um [Ref] em vez de um objeto `Configuration` — lê/escreve
 /// diretamente nos Notifiers correspondentes (Sort, PlayerSettings,
 /// Equalizer, Indexing).
 class BackupService {
   BackupService._();
+
+  /// Progresso das etapas do restore em andamento (avaliações/ocultas,
+  /// playlists, sessões); `null` quando nenhum restore está rodando.
+  /// A reindexação da biblioteca em si é reportada à parte, pelo
+  /// [indexingNotifierProvider] — ambos são ouvidos por
+  /// [BackgroundTaskBanner] via [ValueListenableBuilder]/[ref.watch].
+  static final ValueNotifier<RestoreProgress?> progress = ValueNotifier(null);
+
+  /// `true` durante todo o restore, incluindo a etapa de reindexação (que
+  /// não passa por [progress], e sim pelo [indexingNotifierProvider]).
+  /// Permite ao [BackgroundTaskBanner] rotular a reindexação como
+  /// "Etapa 1/4" do restore, em vez de mostrar o progresso isolado da
+  /// indexação (que por si só tem sua própria contagem de 3 etapas).
+  static final ValueNotifier<bool> isRestoring = ValueNotifier(false);
+
+  /// Reindexação da biblioteca, avaliações/ocultas, playlists, sessões.
+  static const _restoreTotalStages = 4;
 
   // ── Export ──────────────────────────────────────────────────────────────
 
@@ -295,23 +329,60 @@ class BackupService {
     required BackupData data,
     required WidgetRef ref,
   }) async {
-    var allTracks = await MusicDatabase.instance.readAllTracksIncludingHidden();
+    isRestoring.value = true;
+    try {
+      return await _restoreInternal(data: data, ref: ref);
+    } finally {
+      progress.value = null;
+      isRestoring.value = false;
+    }
+  }
 
-    final recreated = await _recreateMissingTracks(
-      data: data,
-      existingTracks: allTracks,
-    );
-    if (recreated.isNotEmpty) {
-      allTracks = await MusicDatabase.instance.readAllTracksIncludingHidden();
+  static Future<RestoreSummary> _restoreInternal({
+    required BackupData data,
+    required WidgetRef ref,
+  }) async {
+    // Restaura settings primeiro (inclui o diretório raiz), e reindexa a
+    // biblioteca inteira a partir dele antes de aplicar o resto do backup.
+    // Isso substitui a recriação pontual de faixas referenciadas: agora
+    // a biblioteca inteira volta, não só o que tinha nota/playlist/sessão.
+    await _restoreSettings(data.settings, ref);
+
+    final rootDirectory = ref
+        .read(indexingNotifierProvider)
+        .valueOrNull
+        ?.rootDirectory;
+    final tracksBeforeReindex = await MusicDatabase.instance
+        .readAllTracksIncludingHidden();
+    var tracksIndexed = 0;
+
+    if (rootDirectory != null) {
+      final permission = await Permission.audio.request();
+      if (permission.isGranted) {
+        await ref.read(indexingNotifierProvider.notifier).startIndexing();
+      }
+      // Sem a permissão concedida não dá pra reindexar agora — segue o
+      // restore só com o que já está na biblioteca, sem travar por isso.
     }
 
-    await _restoreSettings(data.settings, ref);
+    final allTracks = await MusicDatabase.instance
+        .readAllTracksIncludingHidden();
+    tracksIndexed = allTracks.length - tracksBeforeReindex.length;
+    if (tracksIndexed < 0) tracksIndexed = 0;
 
     // Rating e ocultas
     int metaMatched = 0, metaUnmatched = 0;
     final toHide = <int>[];
     final toUnhide = <int>[];
-    for (final meta in data.trackMeta) {
+    for (var i = 0; i < data.trackMeta.length; i++) {
+      final meta = data.trackMeta[i];
+      progress.value = RestoreProgress(
+        stage: 'Restaurando avaliações e faixas ocultas',
+        done: i,
+        total: data.trackMeta.length,
+        stageIndex: 2,
+        stageTotal: _restoreTotalStages,
+      );
       final match = _findMatch(
         path: meta.path,
         title: meta.title,
@@ -344,7 +415,15 @@ class BackupService {
     final existingPlaylists = await PlaylistDatabase.instance
         .readAllPlaylists();
     int playlistsRestored = 0;
-    for (final backupPlaylist in data.playlists) {
+    for (var i = 0; i < data.playlists.length; i++) {
+      final backupPlaylist = data.playlists[i];
+      progress.value = RestoreProgress(
+        stage: 'Restaurando playlists',
+        done: i,
+        total: data.playlists.length,
+        stageIndex: 3,
+        stageTotal: _restoreTotalStages,
+      );
       final existing = existingPlaylists
           .where((p) => p.name == backupPlaylist.name)
           .firstOrNull;
@@ -373,7 +452,15 @@ class BackupService {
     // Sessões de reprodução — upsert mantendo o maior tempo ouvido em caso
     // de mesmo (faixa, data), para não inflar estatísticas em restaurações repetidas.
     int sessionsRestored = 0, sessionsUnmatched = 0;
-    for (final session in data.playSessions) {
+    for (var i = 0; i < data.playSessions.length; i++) {
+      final session = data.playSessions[i];
+      progress.value = RestoreProgress(
+        stage: 'Restaurando sessões de reprodução',
+        done: i,
+        total: data.playSessions.length,
+        stageIndex: 4,
+        stageTotal: _restoreTotalStages,
+      );
       final match = _findMatch(
         path: session.trackPath,
         title: session.trackTitle,
@@ -392,80 +479,17 @@ class BackupService {
       sessionsRestored++;
     }
 
-    // Recarrega para refletir ratings/hidden/faixas recriadas na UI.
+    // Recarrega para refletir ratings/hidden/faixas reindexadas na UI.
     await ref.read(indexingNotifierProvider.notifier).loadIndexedTracks();
 
     return RestoreSummary(
       playlistsRestored: playlistsRestored,
-      tracksRecreated: recreated.length,
+      tracksIndexed: tracksIndexed,
       trackMetaMatched: metaMatched,
       trackMetaUnmatched: metaUnmatched,
       sessionsRestored: sessionsRestored,
       sessionsUnmatched: sessionsUnmatched,
     );
-  }
-
-  /// Recria no banco as faixas referenciadas pelo backup (playlists, notas,
-  /// sessões) que sumiram da biblioteca local — mas cujo arquivo ainda
-  /// existe no path original. Extrai metadados reais, capa e duração, igual
-  /// a uma indexação normal; loudness fica de fora para manter o restore
-  /// rápido (é preenchido na próxima reindexação).
-  static Future<List<MusicTrack>> _recreateMissingTracks({
-    required BackupData data,
-    required List<MusicTrack> existingTracks,
-  }) async {
-    final existingPaths = existingTracks.map((t) => t.path).toSet();
-
-    final referencedPaths = <String>{
-      ...data.trackMeta.map((m) => m.path),
-      ...data.playlists.expand((p) => p.tracks.map((t) => t.path)),
-      ...data.playSessions.map((s) => s.trackPath),
-    };
-
-    final missingPaths = referencedPaths
-        .where((p) => !existingPaths.contains(p))
-        .where((p) => File(p).existsSync())
-        .toList();
-
-    if (missingPaths.isEmpty) return [];
-
-    final newTracks = <MusicTrack>[];
-    final durationPlayer = Player(
-      configuration: const PlayerConfiguration(autoPlay: false),
-    );
-
-    try {
-      for (final path in missingPaths) {
-        var track = await MetadataParser.extractMetadata(path);
-
-        try {
-          final completer = Completer<Duration>();
-          final sub = durationPlayer.stream.duration.listen((d) {
-            if (d > Duration.zero && !completer.isCompleted) {
-              completer.complete(d);
-            }
-          });
-          await durationPlayer.open(Media('file://$path'), play: false);
-          final duration = await completer.future.timeout(
-            const Duration(seconds: 3),
-            onTimeout: () => Duration.zero,
-          );
-          await sub.cancel();
-          track = track.copyWith(durationMs: duration.inMilliseconds);
-        } catch (_) {}
-
-        try {
-          final coverPath = await CoverArtService.extractAndSave(path);
-          if (coverPath != null) track = track.copyWith(coverPath: coverPath);
-        } catch (_) {}
-
-        newTracks.add(track);
-      }
-    } finally {
-      await durationPlayer.dispose();
-    }
-
-    return MusicDatabase.instance.upsertTracks(newTracks);
   }
 
   static Future<void> _restoreSettings(

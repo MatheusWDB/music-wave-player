@@ -52,27 +52,39 @@ class IndexingService {
 
   /// Executa a indexação completa da biblioteca, em três fases visíveis
   /// ao usuário:
-  /// 1. Varredura e indexação: lista os arquivos e extrai metadados básicos
-  ///    (título, artista, álbum) em batches.
-  /// 2. Processamento de metadados: lê duração, extrai capas e persiste no
-  ///    banco. Sem granularidade de progresso (done/total) por enquanto —
-  ///    reporta só o nome da etapa em andamento.
+  /// 1. Varredura: lista os arquivos e extrai metadados básicos (título,
+  ///    artista, álbum) em batches, e remove do banco as faixas cujo
+  ///    arquivo não existe mais (só depende dos paths encontrados, roda
+  ///    antes do processamento pesado de cada faixa).
+  /// 2. Processamento progressivo: para cada faixa, lê duração, extrai
+  ///    capa e já salva no banco — a biblioteca vai sendo preenchida aos
+  ///    poucos em vez de aparecer tudo de uma vez só no final.
   /// 3. Cálculo de loudness: varre apenas as faixas que ainda não têm
   ///    loudness calculado (novas ou de antes dessa feature existir).
   ///
   /// [onProgress] reporta a fase 1: (faixas processadas, total de arquivos
   /// encontrados na pasta). É chamado com o total já conhecido antes do
   /// primeiro batch, para a UI exibir o total desde o início.
-  /// [onMetadataStage] reporta a fase 2: o nome da etapa atual.
+  /// [onTracksRemoved] reporta os ids removidos por não existirem mais no
+  /// disco, logo após a fase 1 — permite a UI já tirá-los da lista em
+  /// memória sem esperar o resto da indexação.
+  /// [onMetadataStage] reporta o início da fase 2.
+  /// [onMetadataProgress] reporta o progresso faixa a faixa da fase 2.
+  /// [onLibraryBatch] entrega faixas já processadas e salvas, em lotes
+  /// curtos (a cada poucas faixas ou intervalo curto de tempo), para a UI
+  /// atualizar a lista da biblioteca sem recompor a tela a cada faixa.
   /// [onLoudnessProgress] reporta a fase 3: (faixas com loudness calculado,
   /// total de faixas pendentes).
-  /// [onComplete] é chamado ao final das três fases, com as faixas salvas
-  /// e a data de scan.
+  /// [onComplete] é chamado ao final das três fases, com o snapshot final
+  /// e definitivo das faixas salvas e a data de scan.
   /// [onError] é chamado em caso de falha.
   static Future<void> startIndexing({
     required String rootDirectory,
     required void Function(int done, int total) onProgress,
+    required void Function(List<int> removedIds) onTracksRemoved,
     required void Function(String stage) onMetadataStage,
+    required void Function(int done, int total) onMetadataProgress,
+    required void Function(List<MusicTrack> newTracks) onLibraryBatch,
     required void Function(int done, int total) onLoudnessProgress,
     required void Function(List<MusicTrack> tracks, DateTime scanDate)
     onComplete,
@@ -82,25 +94,8 @@ class IndexingService {
       final paths = await compute(scanDirectoryForPaths, rootDirectory);
       onProgress(0, paths.length);
 
-      const batchSize = 50;
-      final allTracks = <MusicTrack>[];
-
-      for (int i = 0; i < paths.length; i += batchSize) {
-        final batch = paths.sublist(i, (i + batchSize).clamp(0, paths.length));
-        final batchTracks = await compute(buildTracksFromPaths, batch);
-        allTracks.addAll(batchTracks);
-        onProgress(allTracks.length, paths.length);
-      }
-
-      onMetadataStage('Lendo durações...');
-      await _readDurations(allTracks);
-
-      onMetadataStage('Extraindo capas de álbum...');
-      await _extractCovers(allTracks);
-
-      onMetadataStage('Salvando no banco de dados...');
-      final savedTracks = await MusicDatabase.instance.insertTracks(
-        allTracks,
+      await MusicDatabase.instance.pruneOrphanTracks(
+        paths,
         onTracksRemoved: (removedIds) async {
           // Faixas removidas por não existirem mais na varredura deixam
           // suas sessões de reprodução órfãs — limpa junto para não
@@ -109,8 +104,27 @@ class IndexingService {
           await PlaySessionDatabase.instance.deleteSessionsForTracks(
             removedIds,
           );
+          onTracksRemoved(removedIds);
         },
       );
+
+      const batchSize = 50;
+      final basicTracks = <MusicTrack>[];
+
+      for (int i = 0; i < paths.length; i += batchSize) {
+        final batch = paths.sublist(i, (i + batchSize).clamp(0, paths.length));
+        final batchTracks = await compute(buildTracksFromPaths, batch);
+        basicTracks.addAll(batchTracks);
+        onProgress(basicTracks.length, paths.length);
+      }
+
+      onMetadataStage('Processando faixas...');
+      final savedTracks = await _processTracksProgressively(
+        basicTracks,
+        onProgress: onMetadataProgress,
+        onLibraryBatch: onLibraryBatch,
+      );
+
       final scanDate = DateTime.now();
       await _saveLastScanDate(scanDate);
       await _triggerMediaScan(rootDirectory);
@@ -153,12 +167,36 @@ class IndexingService {
     }
   }
 
-  /// Lê a duração de cada faixa usando um player MPV temporário.
-  static Future<void> _readDurations(List<MusicTrack> tracks) async {
+  /// Processa cada faixa por completo (duração + capa) e já salva no banco
+  /// individualmente, entregando lotes curtos via [onLibraryBatch] — a
+  /// biblioteca vai enchendo aos poucos em vez de aparecer tudo de uma vez
+  /// só no final da indexação.
+  ///
+  /// O lote é liberado a cada 5 faixas processadas ou 500ms, o que vier
+  /// primeiro — junta a resposta visual pedida (faixa a faixa) com um
+  /// número de rebuilds da lista que não compromete a rolagem da tela.
+  static Future<List<MusicTrack>> _processTracksProgressively(
+    List<MusicTrack> tracks, {
+    required void Function(int done, int total) onProgress,
+    required void Function(List<MusicTrack> newTracks) onLibraryBatch,
+  }) async {
     final durationPlayer = Player(
       configuration: const PlayerConfiguration(autoPlay: false),
     );
+    final saved = <MusicTrack>[];
+    final pendingBatch = <MusicTrack>[];
+    var lastEmit = DateTime.now();
+
+    void flushBatch() {
+      if (pendingBatch.isEmpty) return;
+      onLibraryBatch(List.of(pendingBatch));
+      pendingBatch.clear();
+      lastEmit = DateTime.now();
+    }
+
     for (int i = 0; i < tracks.length; i++) {
+      var track = tracks[i];
+
       try {
         final completer = Completer<Duration>();
         final sub = durationPlayer.stream.duration.listen((d) {
@@ -166,32 +204,38 @@ class IndexingService {
             completer.complete(d);
           }
         });
-        await durationPlayer.open(
-          Media('file://${tracks[i].path}'),
-          play: false,
-        );
+        await durationPlayer.open(Media('file://${track.path}'), play: false);
         final duration = await completer.future.timeout(
           const Duration(seconds: 3),
           onTimeout: () => Duration.zero,
         );
         await sub.cancel();
-        tracks[i] = tracks[i].copyWith(durationMs: duration.inMilliseconds);
+        track = track.copyWith(durationMs: duration.inMilliseconds);
       } catch (_) {}
-    }
-    await durationPlayer.dispose();
-  }
 
-  /// Extrai capas de álbum na thread principal.
-  /// getTemporaryDirectory() não funciona em isolates no Android.
-  static Future<void> _extractCovers(List<MusicTrack> tracks) async {
-    for (int i = 0; i < tracks.length; i++) {
       try {
-        final coverPath = await CoverArtService.extractAndSave(tracks[i].path);
-        if (coverPath != null) {
-          tracks[i] = tracks[i].copyWith(coverPath: coverPath);
-        }
+        final coverPath = await CoverArtService.extractAndSave(track.path);
+        if (coverPath != null) track = track.copyWith(coverPath: coverPath);
       } catch (_) {}
+
+      final upserted = await MusicDatabase.instance.upsertTracks([track]);
+      if (upserted.isNotEmpty) {
+        saved.add(upserted.first);
+        pendingBatch.add(upserted.first);
+      }
+
+      onProgress(i + 1, tracks.length);
+
+      final elapsedSinceEmit = DateTime.now().difference(lastEmit);
+      if (pendingBatch.length >= 5 ||
+          elapsedSinceEmit >= const Duration(milliseconds: 500)) {
+        flushBatch();
+      }
     }
+
+    flushBatch();
+    await durationPlayer.dispose();
+    return saved;
   }
 
   static Future<void> _saveLastScanDate(DateTime date) async {

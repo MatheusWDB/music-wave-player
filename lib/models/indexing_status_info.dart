@@ -12,6 +12,8 @@ class IndexingStatusInfo {
   final bool isBusy;
   final bool canScan;
   final String buttonLabel;
+  final int stageIndex;
+  final int stageTotal;
 
   const IndexingStatusInfo({
     required this.statusText,
@@ -19,9 +21,13 @@ class IndexingStatusInfo {
     required this.isBusy,
     required this.canScan,
     required this.buttonLabel,
+    required this.stageIndex,
+    required this.stageTotal,
   });
 
   factory IndexingStatusInfo.from(IndexingState state) {
+    const totalStages = 3; // Varredura, Processamento, Loudness
+
     final isScanning = state.indexingStatus == IndexingStatus.scanning;
     final isProcessingMetadata =
         state.indexingStatus == IndexingStatus.processingMetadata;
@@ -33,8 +39,10 @@ class IndexingStatusInfo {
 
     String statusText = 'Pronto para começar.';
     double? progressValue = 0.0;
+    int stageIndex = 0;
 
     if (isScanning) {
+      stageIndex = 1;
       final total = state.indexedFileTotal;
       final done = state.indexedFileCount;
       final percent = total > 0
@@ -45,9 +53,17 @@ class IndexingStatusInfo {
           : 'Varrendo e indexando...';
       progressValue = total > 0 ? done / total : null;
     } else if (isProcessingMetadata) {
-      statusText = state.processingStage ?? 'Processando metadados...';
-      progressValue = null;
+      stageIndex = 2;
+      final total = state.metadataStageTotal;
+      final done = state.metadataStageDone;
+      final label = state.processingStage ?? 'Processando metadados...';
+      final percent = total > 0
+          ? ((done / total) * 100).toStringAsFixed(0)
+          : '0';
+      statusText = total > 0 ? '$label $done/$total ($percent%)' : label;
+      progressValue = total > 0 ? done / total : null;
     } else if (isCalculatingLoudness) {
+      stageIndex = 3;
       final total = state.loudnessTotal;
       final done = state.loudnessDone;
       final percent = total > 0
@@ -81,6 +97,8 @@ class IndexingStatusInfo {
       isBusy: isBusy,
       canScan: isDirectorySet && !isBusy,
       buttonLabel: buttonLabel,
+      stageIndex: stageIndex,
+      stageTotal: totalStages,
     );
   }
 }

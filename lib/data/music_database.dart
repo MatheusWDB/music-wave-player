@@ -106,53 +106,70 @@ class MusicDatabase {
     }
   }
 
-  /// Varredura completa do diretório: insere/atualiza as faixas recebidas e
-  /// REMOVE do banco qualquer faixa não editada ausente da lista — assume
-  /// que [tracks] representa o conteúdo inteiro do diretório indexado.
-  ///
-  /// [onTracksRemoved] é chamado com os IDs das faixas removidas por não
-  /// existirem mais na varredura, permitindo que o chamador limpe dados
-  /// relacionados (ex: sessões de reprodução, que ficariam órfãs).
-  ///
-  /// Para inserir/atualizar um subconjunto pontual sem apagar o resto
-  /// (ex: restauração de backup), use [upsertTracks].
-  Future<List<MusicTrack>> insertTracks(
-    List<MusicTrack> tracks, {
-    void Function(List<int> removedTrackIds)? onTracksRemoved,
-  }) {
-    return _upsertTracks(
-      tracks,
-      pruneOrphans: true,
-      onTracksRemoved: onTracksRemoved,
-    );
-  }
-
   /// Insere ou atualiza as faixas recebidas sem remover nada do banco.
-  /// Usado para recriar faixas pontuais (ex: restauração de backup), onde
-  /// as faixas passadas são só um subconjunto da biblioteca, não uma
-  /// varredura completa.
+  /// Usado para recriar faixas pontuais (ex: restauração de backup) ou
+  /// faixa a faixa (indexação progressiva) — a remoção de órfãs vive à
+  /// parte, em [pruneOrphanTracks].
   Future<List<MusicTrack>> upsertTracks(List<MusicTrack> tracks) {
-    return _upsertTracks(tracks, pruneOrphans: false);
+    return _upsertTracks(tracks);
   }
 
-  Future<List<MusicTrack>> _upsertTracks(
-    List<MusicTrack> tracks, {
-    required bool pruneOrphans,
+  /// Remove faixas não editadas cujo arquivo não está mais presente em
+  /// [currentPaths] — a varredura completa e atual do diretório raiz.
+  ///
+  /// Roda sozinho, logo após a varredura de arquivos (fase 1), sem esperar
+  /// a indexação progressiva (título/duração/capa) de cada faixa: a
+  /// decisão de "existe ou não" só depende do path, não do resto do
+  /// metadado.
+  Future<void> pruneOrphanTracks(
+    List<String> currentPaths, {
     void Function(List<int> removedTrackIds)? onTracksRemoved,
   }) async {
+    final db = await instance.database;
+    final currentPathSet = currentPaths.toSet();
+    final existingRows = await db.query(tableTracks);
+
+    final orphanIds = existingRows
+        .where(
+          (row) =>
+              !currentPathSet.contains(row[columnPath] as String) &&
+              (row[columnIsEdited] as int? ?? 0) == 0,
+        )
+        .map((row) => row[columnId] as int)
+        .toList();
+
+    if (orphanIds.isEmpty) return;
+
+    final placeholders = orphanIds.map((_) => '?').join(',');
+    await db.rawDelete(
+      'DELETE FROM $tableTracks WHERE $columnId IN ($placeholders)',
+      orphanIds,
+    );
+    onTracksRemoved?.call(orphanIds);
+  }
+
+  Future<List<MusicTrack>> _upsertTracks(List<MusicTrack> tracks) async {
     final db = await instance.database;
     final List<MusicTrack> savedTracks = [];
     final now = DateTime.now().toIso8601String();
 
-    // Carrega todas as faixas existentes indexadas por path para lookup O(1)
-    final existingRows = await db.query(tableTracks);
+    final incomingPaths = tracks.map((t) => t.path).toSet();
+
+    // Carrega só as faixas existentes cujo path está no lote recebido —
+    // antes carregava a tabela inteira, o que ficou caro depois que a
+    // indexação progressiva passou a chamar isso faixa a faixa.
+    final existingRows = incomingPaths.isEmpty
+        ? <Map<String, Object?>>[]
+        : await db.query(
+            tableTracks,
+            where:
+                '$columnPath IN (${List.filled(incomingPaths.length, '?').join(',')})',
+            whereArgs: incomingPaths.toList(),
+          );
     final existingByPath = {
       for (final row in existingRows)
         row[columnPath] as String: MusicTrack.fromMap(row),
     };
-
-    final incomingPaths = tracks.map((t) => t.path).toSet();
-    List<int> removedIds = const [];
 
     await db.transaction((txn) async {
       for (final track in tracks) {
@@ -209,30 +226,7 @@ class MusicDatabase {
           savedTracks.add(track.copyWith(id: id));
         }
       }
-
-      if (!pruneOrphans) return;
-
-      // Remove faixas não editadas cujo arquivo não existe mais no disco —
-      // só é seguro quando [tracks] representa a varredura completa do
-      // diretório, nunca em upserts parciais.
-      final orphanIds = existingByPath.entries
-          .where((e) => !incomingPaths.contains(e.key) && !e.value.isEdited)
-          .map((e) => e.value.id!)
-          .toList();
-
-      if (orphanIds.isNotEmpty) {
-        final placeholders = orphanIds.map((_) => '?').join(',');
-        await txn.rawDelete(
-          'DELETE FROM $tableTracks WHERE $columnId IN ($placeholders)',
-          orphanIds,
-        );
-        removedIds = orphanIds;
-      }
     });
-
-    if (removedIds.isNotEmpty) {
-      onTracksRemoved?.call(removedIds);
-    }
 
     return savedTracks;
   }

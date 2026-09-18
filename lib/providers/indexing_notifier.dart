@@ -38,6 +38,8 @@ class IndexingState {
   final int indexedFileCount;
   final int indexedFileTotal;
   final String? processingStage;
+  final int metadataStageDone;
+  final int metadataStageTotal;
   final int loudnessDone;
   final int loudnessTotal;
 
@@ -49,6 +51,8 @@ class IndexingState {
     this.indexedFileCount = 0,
     this.indexedFileTotal = 0,
     this.processingStage,
+    this.metadataStageDone = 0,
+    this.metadataStageTotal = 0,
     this.loudnessDone = 0,
     this.loudnessTotal = 0,
   });
@@ -67,6 +71,8 @@ class IndexingState {
     int? indexedFileTotal,
     String? processingStage,
     bool clearProcessingStage = false,
+    int? metadataStageDone,
+    int? metadataStageTotal,
     int? loudnessDone,
     int? loudnessTotal,
   }) {
@@ -80,6 +86,12 @@ class IndexingState {
       processingStage: clearProcessingStage
           ? null
           : (processingStage ?? this.processingStage),
+      metadataStageDone: clearProcessingStage
+          ? 0
+          : (metadataStageDone ?? this.metadataStageDone),
+      metadataStageTotal: clearProcessingStage
+          ? 0
+          : (metadataStageTotal ?? this.metadataStageTotal),
       loudnessDone: loudnessDone ?? this.loudnessDone,
       loudnessTotal: loudnessTotal ?? this.loudnessTotal,
     );
@@ -211,7 +223,10 @@ class IndexingNotifier extends _$IndexingNotifier {
     state = AsyncData(
       current.copyWith(
         indexingStatus: IndexingStatus.scanning,
-        indexedTracks: [],
+        // indexedTracks não é zerado aqui — a biblioteca atual continua
+        // navegável durante a varredura/reindexação; ela é atualizada aos
+        // poucos via onTracksRemoved/onLibraryBatch, e só recebe o
+        // snapshot final em onComplete.
         indexedFileCount: 0,
         indexedFileTotal: 0,
         clearProcessingStage: true,
@@ -229,6 +244,18 @@ class IndexingNotifier extends _$IndexingNotifier {
           c.copyWith(indexedFileCount: done, indexedFileTotal: total),
         );
       },
+      onTracksRemoved: (removedIds) {
+        final c = state.valueOrNull;
+        if (c == null) return;
+        final removedSet = removedIds.toSet();
+        state = AsyncData(
+          c.copyWith(
+            indexedTracks: c.indexedTracks
+                .where((t) => !removedSet.contains(t.id))
+                .toList(),
+          ),
+        );
+      },
       onMetadataStage: (stage) {
         final c = state.valueOrNull;
         if (c == null) return;
@@ -236,8 +263,31 @@ class IndexingNotifier extends _$IndexingNotifier {
           c.copyWith(
             indexingStatus: IndexingStatus.processingMetadata,
             processingStage: stage,
+            metadataStageDone: 0,
+            metadataStageTotal: 0,
           ),
         );
+      },
+      onMetadataProgress: (done, total) {
+        final c = state.valueOrNull;
+        if (c == null) return;
+        state = AsyncData(
+          c.copyWith(metadataStageDone: done, metadataStageTotal: total),
+        );
+      },
+      onLibraryBatch: (newTracks) {
+        final c = state.valueOrNull;
+        if (c == null) return;
+        final merged = [...c.indexedTracks];
+        for (final track in newTracks) {
+          final index = merged.indexWhere((t) => t.id == track.id);
+          if (index >= 0) {
+            merged[index] = track;
+          } else {
+            merged.add(track);
+          }
+        }
+        state = AsyncData(c.copyWith(indexedTracks: merged));
       },
       onLoudnessProgress: (done, total) {
         final c = state.valueOrNull;

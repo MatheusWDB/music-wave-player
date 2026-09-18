@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:music_wave_player/components/app_menu_sheet.dart';
+import 'package:music_wave_player/components/background_task_banner.dart';
 import 'package:music_wave_player/components/library_bottom_nav.dart';
 import 'package:music_wave_player/components/library_top_bar.dart';
 import 'package:music_wave_player/components/mini_player_component.dart';
@@ -68,6 +69,7 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
                   ),
                   onMenuTap: () => _openMenu(context),
                 ),
+                const BackgroundTaskBanner(),
                 Expanded(child: TabsComponent(activeIndex: _activeIndex)),
               ],
             ),
