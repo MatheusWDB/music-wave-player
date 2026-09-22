@@ -1,7 +1,10 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:music_wave_player/screens/library_screen.dart';
+import 'package:music_wave_player/services/background_task_service.dart';
 import 'package:music_wave_player/theme/app_colors.dart';
 import 'package:music_wave_player/theme/app_theme.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -41,6 +44,10 @@ Future<void> main() async {
       statusBarIconBrightness: Brightness.light,
     ),
   );
+
+  // Configuração síncrona do plugin — precisa rodar antes do runApp. A
+  // checagem de permissão de notificação é assíncrona e não bloqueia.
+  unawaited(BackgroundTaskService.init());
 
   runApp(const ProviderScope(child: MyApp()));
 

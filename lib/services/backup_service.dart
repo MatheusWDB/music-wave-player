@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
@@ -10,6 +11,7 @@ import 'package:music_wave_player/providers/equalizer_notifier.dart';
 import 'package:music_wave_player/providers/indexing_notifier.dart';
 import 'package:music_wave_player/providers/player_settings_notifier.dart';
 import 'package:music_wave_player/providers/sort_notifier.dart';
+import 'package:music_wave_player/services/background_task_service.dart';
 import 'package:music_wave_player/services/equalizer_service.dart';
 import 'package:music_wave_player/services/sort_service.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -169,6 +171,21 @@ class BackupService {
 
   /// Reindexação da biblioteca, avaliações/ocultas, playlists, sessões.
   static const _restoreTotalStages = 4;
+
+  /// Formata e manda o texto de progresso pra notificação — chamado a
+  /// cada item das etapas 2-4; o throttle de frequência já é feito
+  /// dentro de [BackgroundTaskService.update].
+  static void _notifyRestoreProgress(RestoreProgress p) {
+    final pct = p.total > 0
+        ? ((p.done / p.total) * 100).toStringAsFixed(0)
+        : '0';
+    final text = p.total > 0
+        ? 'Etapa ${p.stageIndex}/${p.stageTotal} · ${p.stage}... ${p.done}/${p.total} ($pct%)'
+        : 'Etapa ${p.stageIndex}/${p.stageTotal} · ${p.stage}...';
+    unawaited(
+      BackgroundTaskService.update(title: 'MusicWave Player', text: text),
+    );
+  }
 
   // ── Export ──────────────────────────────────────────────────────────────
 
@@ -330,11 +347,18 @@ class BackupService {
     required WidgetRef ref,
   }) async {
     isRestoring.value = true;
+    unawaited(
+      BackgroundTaskService.start(
+        title: 'MusicWave Player',
+        text: 'Restaurando backup...',
+      ),
+    );
     try {
       return await _restoreInternal(data: data, ref: ref);
     } finally {
       progress.value = null;
       isRestoring.value = false;
+      unawaited(BackgroundTaskService.stop());
     }
   }
 
@@ -383,6 +407,7 @@ class BackupService {
         stageIndex: 2,
         stageTotal: _restoreTotalStages,
       );
+      _notifyRestoreProgress(progress.value!);
       final match = _findMatch(
         path: meta.path,
         title: meta.title,
@@ -424,6 +449,7 @@ class BackupService {
         stageIndex: 3,
         stageTotal: _restoreTotalStages,
       );
+      _notifyRestoreProgress(progress.value!);
       final existing = existingPlaylists
           .where((p) => p.name == backupPlaylist.name)
           .firstOrNull;
@@ -461,6 +487,7 @@ class BackupService {
         stageIndex: 4,
         stageTotal: _restoreTotalStages,
       );
+      _notifyRestoreProgress(progress.value!);
       final match = _findMatch(
         path: session.trackPath,
         title: session.trackTitle,

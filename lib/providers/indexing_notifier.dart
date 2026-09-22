@@ -1,6 +1,9 @@
+import 'dart:async';
+
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:music_wave_player/data/music_database.dart';
+import 'package:music_wave_player/models/indexing_status_info.dart';
 import 'package:music_wave_player/models/music_track.dart';
 import 'package:music_wave_player/providers/equalizer_notifier.dart';
 import 'package:music_wave_player/providers/music_audio_handler_provider.dart';
@@ -8,6 +11,7 @@ import 'package:music_wave_player/providers/playback_notifier.dart';
 import 'package:music_wave_player/providers/player_settings_notifier.dart';
 import 'package:music_wave_player/providers/queue_notifier.dart';
 import 'package:music_wave_player/services/indexing_service.dart';
+import 'package:music_wave_player/services/background_task_service.dart';
 import 'package:music_wave_player/services/metadata_repair_service.dart';
 import 'package:music_wave_player/services/favorites_service.dart';
 import 'package:music_wave_player/services/track_repository.dart';
@@ -235,6 +239,26 @@ class IndexingNotifier extends _$IndexingNotifier {
       ),
     );
 
+    unawaited(
+      BackgroundTaskService.start(
+        title: 'MusicWave Player',
+        text: 'Iniciando indexação...',
+      ),
+    );
+
+    void notifyProgress() {
+      final c = state.valueOrNull;
+      if (c == null) return;
+      final info = IndexingStatusInfo.from(c);
+      unawaited(
+        BackgroundTaskService.update(
+          title: 'MusicWave Player',
+          text:
+              'Etapa ${info.stageIndex}/${info.stageTotal} · ${info.statusText}',
+        ),
+      );
+    }
+
     await IndexingService.startIndexing(
       rootDirectory: current.rootDirectory!,
       onProgress: (done, total) {
@@ -243,6 +267,7 @@ class IndexingNotifier extends _$IndexingNotifier {
         state = AsyncData(
           c.copyWith(indexedFileCount: done, indexedFileTotal: total),
         );
+        notifyProgress();
       },
       onTracksRemoved: (removedIds) {
         final c = state.valueOrNull;
@@ -267,6 +292,7 @@ class IndexingNotifier extends _$IndexingNotifier {
             metadataStageTotal: 0,
           ),
         );
+        notifyProgress();
       },
       onMetadataProgress: (done, total) {
         final c = state.valueOrNull;
@@ -274,6 +300,7 @@ class IndexingNotifier extends _$IndexingNotifier {
         state = AsyncData(
           c.copyWith(metadataStageDone: done, metadataStageTotal: total),
         );
+        notifyProgress();
       },
       onLibraryBatch: (newTracks) {
         final c = state.valueOrNull;
@@ -299,6 +326,7 @@ class IndexingNotifier extends _$IndexingNotifier {
             loudnessTotal: total,
           ),
         );
+        notifyProgress();
       },
       onComplete: (tracks, scanDate) {
         final c = state.valueOrNull;
@@ -314,11 +342,13 @@ class IndexingNotifier extends _$IndexingNotifier {
         );
         _regenerateQueue(tracks);
         _saveLastScanDate(scanDate);
+        unawaited(BackgroundTaskService.stop());
       },
       onError: (e) {
         final c = state.valueOrNull;
         if (c == null) return;
         state = AsyncData(c.copyWith(indexingStatus: IndexingStatus.error));
+        unawaited(BackgroundTaskService.stop());
       },
     );
   }
