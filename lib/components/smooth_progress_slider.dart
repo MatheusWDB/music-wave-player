@@ -136,7 +136,10 @@ class _SmoothProgressSliderState extends ConsumerState<SmoothProgressSlider>
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Text(
-                _fmt((widget.draggingValue ?? _smoothPosition).toInt()),
+                _fmt(
+                  (widget.draggingValue ?? _smoothPosition.clamp(0.0, max))
+                      .toInt(),
+                ),
                 style: TextStyle(
                   color: colorScheme.onSurfaceVariant,
                   fontSize: 12,

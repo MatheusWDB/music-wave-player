@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:music_wave_player/components/edit_track_bottom_sheet.dart';
+import 'package:music_wave_player/components/pick_playlist_dialog.dart';
 import 'package:music_wave_player/components/rating_bottom_sheet.dart';
 import 'package:music_wave_player/components/search_results_list.dart';
 import 'package:music_wave_player/data/playlist_database.dart';
@@ -8,6 +10,7 @@ import 'package:music_wave_player/models/playlist.dart';
 import 'package:music_wave_player/providers/current_track_provider.dart';
 import 'package:music_wave_player/providers/indexing_notifier.dart';
 import 'package:music_wave_player/providers/playback_notifier.dart';
+import 'package:music_wave_player/providers/queue_notifier.dart';
 import 'package:music_wave_player/screens/album_detail_screen.dart';
 import 'package:music_wave_player/screens/artist_detail_screen.dart';
 import 'package:music_wave_player/screens/playlist_detail_screen.dart';
@@ -137,6 +140,67 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
     return RatingBottomSheet.show(context, track: track);
   }
 
+  Future<void> _editTrack(MusicTrack track) {
+    return EditTrackBottomSheet.show(context, track: track);
+  }
+
+  Future<void> _addTrackToPlaylist(MusicTrack track) async {
+    final playlists = await PlaylistDatabase.instance.readAllPlaylists();
+    if (!mounted) return;
+
+    final playlistId = await PickPlaylistDialog.show(
+      context,
+      playlists: playlists,
+    );
+    if (playlistId == null) return;
+
+    await PlaylistDatabase.instance.addTracks(playlistId, [track.id!]);
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('Música adicionada à playlist!'),
+          behavior: SnackBarBehavior.floating,
+          backgroundColor: Theme.of(context).colorScheme.primary,
+        ),
+      );
+    }
+  }
+
+  void _showQueueSnack(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        behavior: SnackBarBehavior.floating,
+        duration: const Duration(seconds: 2),
+      ),
+    );
+  }
+
+  void _insertNext(MusicTrack track) {
+    ref.read(queueNotifierProvider.notifier).insertAfterCurrent([track.id!]);
+    _showQueueSnack('Música adicionada após a atual');
+  }
+
+  void _addToEnd(MusicTrack track) {
+    ref.read(queueNotifierProvider.notifier).addToEnd([track.id!]);
+    _showQueueSnack('Música adicionada ao final da fila');
+  }
+
+  Future<void> _recalculateSilence(MusicTrack track) async {
+    await ref
+        .read(indexingNotifierProvider.notifier)
+        .clearTrackEffectiveEnd(track.id!);
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Será reanalisada na próxima reprodução.'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  }
+
   Future<void> _hideTrack(MusicTrack track) async {
     await ref.read(indexingNotifierProvider.notifier).hideTracks([track.id!]);
     setState(() => _query = _query);
@@ -221,8 +285,13 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
               onArtistTap: _openArtist,
               onAlbumTap: _openAlbum,
               onPlaylistTap: _openPlaylist,
+              onEditTrack: _editTrack,
               onRateTrack: _rateTrack,
+              onAddToPlaylist: _addTrackToPlaylist,
+              onInsertNext: _insertNext,
+              onAddToEnd: _addToEnd,
               onHideTrack: _hideTrack,
+              onRecalculateSilence: _recalculateSilence,
             ),
     );
   }

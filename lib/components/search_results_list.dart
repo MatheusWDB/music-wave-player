@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:music_wave_player/components/cover_art_widget.dart';
+import 'package:music_wave_player/components/track_options_bottom_sheet.dart';
 import 'package:music_wave_player/models/music_track.dart';
 import 'package:music_wave_player/models/playlist.dart';
 
@@ -16,8 +17,13 @@ class SearchResultsList extends StatelessWidget {
   final void Function(String artist, List<MusicTrack> tracks) onArtistTap;
   final void Function(String album, List<MusicTrack> tracks) onAlbumTap;
   final ValueChanged<Playlist> onPlaylistTap;
+  final ValueChanged<MusicTrack> onEditTrack;
   final ValueChanged<MusicTrack> onRateTrack;
+  final ValueChanged<MusicTrack> onAddToPlaylist;
+  final ValueChanged<MusicTrack> onInsertNext;
+  final ValueChanged<MusicTrack> onAddToEnd;
   final ValueChanged<MusicTrack> onHideTrack;
+  final ValueChanged<MusicTrack> onRecalculateSilence;
 
   const SearchResultsList({
     super.key,
@@ -29,8 +35,13 @@ class SearchResultsList extends StatelessWidget {
     required this.onArtistTap,
     required this.onAlbumTap,
     required this.onPlaylistTap,
+    required this.onEditTrack,
     required this.onRateTrack,
+    required this.onAddToPlaylist,
+    required this.onInsertNext,
+    required this.onAddToEnd,
     required this.onHideTrack,
+    required this.onRecalculateSilence,
     this.currentTrackId,
   });
 
@@ -64,40 +75,22 @@ class SearchResultsList extends StatelessWidget {
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
               ),
-              trailing: PopupMenuButton<String>(
+              trailing: IconButton(
                 icon: Icon(
                   Icons.more_vert,
                   color: colorScheme.onSurfaceVariant,
                 ),
-                onSelected: (value) {
-                  if (value == 'rate') {
-                    onRateTrack(track);
-                  } else if (value == 'hide') {
-                    onHideTrack(track);
-                  }
-                },
-                itemBuilder: (_) => const [
-                  PopupMenuItem(
-                    value: 'rate',
-                    child: Row(
-                      children: [
-                        Icon(Icons.star_outline),
-                        SizedBox(width: 12),
-                        Text('Avaliar'),
-                      ],
-                    ),
-                  ),
-                  PopupMenuItem(
-                    value: 'hide',
-                    child: Row(
-                      children: [
-                        Icon(Icons.visibility_off_outlined),
-                        SizedBox(width: 12),
-                        Text('Ocultar'),
-                      ],
-                    ),
-                  ),
-                ],
+                onPressed: () => TrackOptionsBottomSheet.show(
+                  context,
+                  track: track,
+                  onEdit: () => onEditTrack(track),
+                  onRate: () => onRateTrack(track),
+                  onAddToPlaylist: () => onAddToPlaylist(track),
+                  onInsertNext: () => onInsertNext(track),
+                  onAddToEnd: () => onAddToEnd(track),
+                  onHide: () => onHideTrack(track),
+                  onRecalculateSilence: () => onRecalculateSilence(track),
+                ),
               ),
               onTap: () => onTrackTap(track),
             ),

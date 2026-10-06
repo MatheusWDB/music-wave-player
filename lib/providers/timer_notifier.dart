@@ -109,7 +109,9 @@ class TimerNotifier extends _$TimerNotifier {
       final audioHandler = ref.read(musicAudioHandlerProvider);
       audioHandler.pause();
       // Pausa veio do temporizador, não do usuário: não faz sentido retomar
-      // depois de onde parou, então zera a posição salva para resume.
+      // depois de onde parou. Busca a posição 0 agora (pra tela e o player
+      // refletirem isso na hora) e também salva pra retomada futura.
+      audioHandler.seek(Duration.zero);
       ref
           .read(playbackNotifierProvider.notifier)
           .saveCurrentPositionForResume(0);

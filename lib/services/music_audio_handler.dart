@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:mpv_audio_kit/mpv_audio_kit.dart';
@@ -11,6 +12,7 @@ import 'package:music_wave_player/providers/playback_notifier.dart';
 import 'package:music_wave_player/providers/player_settings_notifier.dart';
 import 'package:music_wave_player/providers/timer_notifier.dart';
 import 'package:music_wave_player/services/silence_detection_service.dart';
+import 'package:path_provider/path_provider.dart';
 
 class MusicAudioHandler {
   final Ref _ref;
@@ -25,11 +27,21 @@ class MusicAudioHandler {
   DateTime? _currentTrackLoadedAt;
   // Evita disparar o avanço por effectiveEndMs mais de uma vez por faixa.
   bool _effectiveEndTriggered = false;
+  // Evita disparar _finishTrack() mais de uma vez pra mesma faixa, não
+  // importa qual mecanismo dispara primeiro (completed nativo,
+  // effectiveEndMs ou o watchdog de "travou no fim" abaixo).
+  bool _trackFinishEmitted = false;
 
   Timer? _crossfadeTimer;
   bool _crossfadeInProgress = false;
   // Evita disparar o fade out de fim de faixa mais de uma vez por faixa
   bool _endOfTrackFadeStarted = false;
+
+  // Watchdog: se a posição ficar "colada" bem perto do fim da faixa por
+  // tempo demais sem nenhum "completed" chegar (observado em arquivos
+  // específicos — ver Bug "Heaven's On Fire"/"Right Round"), força o
+  // avanço mesmo assim em vez de deixar tocando parado pra sempre.
+  Timer? _stuckAtEndWatchdog;
 
   // Volume base — separado do volume do sistema
   final double _baseVolume = 100.0;
@@ -129,6 +141,22 @@ class MusicAudioHandler {
 
   // ── Normalização de volume ────────────────────────────────────────────────
 
+  // DIAGNÓSTICO TEMPORÁRIO (item 3 — normalização). Remover depois de
+  // confirmar/fechar a investigação de loudness. Escreve em armazenamento
+  // externo específico do app — não precisa de permissão extra, puxa com:
+  //   adb pull /storage/emulated/0/Android/data/br.com.hematsu.music_wave_player/files/loudness_log.txt
+  Future<void> _logLoudness(String line) async {
+    try {
+      final dir = await getExternalStorageDirectory();
+      if (dir == null) return;
+      final file = File('${dir.path}/loudness_log.txt');
+      final timestamp = DateTime.now().toIso8601String();
+      await file.writeAsString('$timestamp  $line\n', mode: FileMode.append);
+    } catch (_) {
+      // Log é só diagnóstico — nunca deve derrubar a reprodução.
+    }
+  }
+
   /// Aplica o pré-amp (setVolumeGain) calculado a partir do loudness
   /// integrado (LUFS) da faixa atual, usando -18 LUFS como referência
   /// (padrão ReplayGain 2.0).
@@ -136,14 +164,29 @@ class MusicAudioHandler {
   /// Se a faixa ainda não tiver loudness calculado (caso raro: tocada antes
   /// do scan da indexação terminar), o gain é zerado — sem normalização —
   /// para não travar a reprodução.
-  Future<void> _applyLoudnessGain() async {
-    final lufs = _ref.read(currentTrackProvider)?.loudnessLufs;
+  Future<void> _applyLoudnessGain({double? knownLufs}) async {
+    final track = _ref.read(currentTrackProvider);
+    // Na retomada da última faixa ao abrir o app, isso roda dentro do
+    // build() do IndexingNotifier — o próprio provider que alimenta
+    // currentTrackProvider ainda não terminou de inicializar, então ele
+    // sempre volta null nesse momento específico. knownLufs é o valor que
+    // o chamador já tinha em mãos, sem depender do provider estar pronto.
+    final lufs = knownLufs ?? track?.loudnessLufs;
+    final title = track?.title ?? '(retomando última sessão)';
+    final artist = track?.artist ?? '';
+    final label = artist.isEmpty ? title : '$title — $artist';
     if (lufs == null) {
+      final line = '"$label" sem LUFS calculado — ganho 0 (sem normalização)';
+      debugPrint('[Loudness] $line');
+      unawaited(_logLoudness(line));
       await player.setVolumeGain(0.0);
       return;
     }
     const targetLufs = -18.0;
     final gain = (targetLufs - lufs).clamp(-24.0, 24.0);
+    final line = '"$label" lufs=$lufs alvo=$targetLufs ganho=${gain}dB';
+    debugPrint('[Loudness] $line');
+    unawaited(_logLoudness(line));
     await player.setVolumeGain(gain);
   }
 
@@ -247,6 +290,33 @@ class MusicAudioHandler {
           // Corte abrupto no ponto exato soa estranho (ex: cauda de
           // reverb ainda decaindo). Um fade curto disfarça a transição.
           unawaited(_fadeOut(2).then((_) => _finishTrack()));
+        }
+      }
+
+      // Watchdog: alguns arquivos específicos nunca emitem "completed" ao
+      // chegar no fim (o mpv simplesmente para de reportar progresso,
+      // sem avisar) — a faixa fica "tocando" parada pra sempre, sem
+      // pausar nem avançar. Se a posição ficar muito perto do fim por
+      // tempo demais sem nada resolver isso, força o avanço na mão.
+      final durationMs = player.state.duration.inMilliseconds;
+      if (!_trackFinishEmitted && durationMs > 0) {
+        final remainingMs = durationMs - pos.inMilliseconds;
+        if (remainingMs <= 300) {
+          _stuckAtEndWatchdog ??= Timer(const Duration(seconds: 2), () {
+            _stuckAtEndWatchdog = null;
+            if (_trackFinishEmitted) return;
+            if (!player.state.playing) return; // pausa deliberada, não mexe
+            final nowRemaining =
+                player.state.duration.inMilliseconds -
+                player.state.position.inMilliseconds;
+            // Saiu da janela de "perto do fim" (seek, nova faixa já
+            // carregada etc.) — não é mais o mesmo travamento.
+            if (nowRemaining > 300) return;
+            _finishTrack();
+          });
+        } else {
+          _stuckAtEndWatchdog?.cancel();
+          _stuckAtEndWatchdog = null;
         }
       }
     });
@@ -361,8 +431,12 @@ class MusicAudioHandler {
 
   /// Avança para a próxima faixa (ou pausa, se o temporizador determinou
   /// isso ao chegar no fim). Compartilhado entre o "completed" nativo do
-  /// mpv e o gatilho de effectiveEndMs (silêncio final detectado).
+  /// mpv, o gatilho de effectiveEndMs (silêncio final detectado) e o
+  /// watchdog de faixa travada no fim.
   void _finishTrack() {
+    if (_trackFinishEmitted) return;
+    _trackFinishEmitted = true;
+
     final shouldPause = _ref
         .read(timerNotifierProvider.notifier)
         .onTrackFinished();
@@ -389,15 +463,42 @@ class MusicAudioHandler {
 
   // ── Controles de reprodução ───────────────────────────────────────────────
 
-  Future<void> loadTrack(String path) async {
+  /// Marca qual chamada de [loadTrack] é a mais recente. Se duas
+  /// sobrepõem (ex: retomar a última faixa ao abrir o app enquanto o
+  /// usuário já toca outra pela busca), a mais antiga aborta em vez de
+  /// aplicar seek/gain/volume por cima da faixa errada.
+  int _loadGeneration = 0;
+
+  Future<void> loadTrack(String path, {double? knownLufs}) async {
+    final myGeneration = ++_loadGeneration;
+    bool superseded() => myGeneration != _loadGeneration;
+    void logAbort(String stage) {
+      final line =
+          'loadTrack "$path" (geração $myGeneration) abortado em "$stage" — superado pela geração $_loadGeneration';
+      debugPrint('[Loudness] $line');
+      unawaited(_logLoudness(line));
+    }
+
+    debugPrint('[Loudness] loadTrack "$path" iniciado (geração $myGeneration)');
+    unawaited(
+      _logLoudness('loadTrack "$path" iniciado (geração $myGeneration)'),
+    );
+
     _pausedAtTrackEnd = false;
     _effectiveEndTriggered = false;
+    _trackFinishEmitted = false;
+    _stuckAtEndWatchdog?.cancel();
+    _stuckAtEndWatchdog = null;
     // Cancela qualquer fade em andamento e reseta flags para a nova faixa
     _crossfadeTimer?.cancel();
     _crossfadeInProgress = false;
     _endOfTrackFadeStarted = false;
 
     await _flushSession();
+    if (superseded()) {
+      logAbort('após _flushSession');
+      return;
+    }
 
     final track = _ref.read(currentTrackProvider);
     if (track?.id != null) _startSession(track!.id!);
@@ -414,6 +515,11 @@ class MusicAudioHandler {
     });
 
     await player.open(Media(uri), play: false);
+    if (superseded()) {
+      logAbort('após player.open');
+      sub.cancel();
+      return;
+    }
     _currentTrackLoadedAt = DateTime.now();
 
     await completer.future.timeout(
@@ -422,12 +528,20 @@ class MusicAudioHandler {
         sub?.cancel();
       },
     );
+    if (superseded()) {
+      logAbort('após aguardar duração');
+      return;
+    }
 
     final playbackSpeed =
         _ref.read(playerSettingsNotifierProvider).valueOrNull?.playbackSpeed ??
         1.0;
     if (playbackSpeed != 1.0) {
       await player.setRate(playbackSpeed);
+      if (superseded()) {
+        logAbort('após setRate');
+        return;
+      }
     }
 
     final lastSeekPositionMs =
@@ -435,6 +549,10 @@ class MusicAudioHandler {
         0;
     if (lastSeekPositionMs > 0) {
       await player.seek(Duration(milliseconds: lastSeekPositionMs));
+      if (superseded()) {
+        logAbort('após seek de retomada');
+        return;
+      }
       _ref.read(playbackNotifierProvider.notifier).consumeLastSeekPosition();
     }
 
@@ -445,7 +563,13 @@ class MusicAudioHandler {
         .read(playbackNotifierProvider.notifier)
         .updateCurrentPosition(player.state.position.inMilliseconds);
 
-    await _applyLoudnessGain();
+    await _applyLoudnessGain(knownLufs: knownLufs);
+    if (superseded()) {
+      logAbort(
+        'após _applyLoudnessGain (ganho já foi aplicado, mas o resto da configuração da faixa não)',
+      );
+      return;
+    }
 
     // Analisa silêncio final em background (não bloqueia a reprodução) —
     // só roda uma vez por faixa; o resultado fica salvo pra sempre.
@@ -494,9 +618,17 @@ class MusicAudioHandler {
     }
   }
 
-  Future<void> play() async {
-    if (_fadeOnPauseResume && !_crossfadeInProgress) {
-      // Fade ao retomar: zera volume, toca, sobe gradualmente
+  /// [isAutoAdvance] só deve ser true quando essa chamada veio do fim
+  /// natural da faixa anterior (ver trackDidFinish em PlaybackNotifier) —
+  /// é o único caso em que o fade "ao pausar/retomar" deve acontecer.
+  /// Retomar de uma pausa manual ou pular faixa não disparam fade: além
+  /// de não fazer sentido nesses casos, o fade sobrescrevia o ganho de
+  /// normalização recém-aplicado (setVolume rodando por cima do
+  /// setVolumeGain), fazendo a faixa soar mais alta/baixa que o normal
+  /// logo no início.
+  Future<void> play({bool isAutoAdvance = false}) async {
+    if (_fadeOnPauseResume && isAutoAdvance && !_crossfadeInProgress) {
+      // Fade ao avançar naturalmente: zera volume, toca, sobe gradualmente
       await player.setVolume(0);
       await player.play();
       _fadeIn(1);
@@ -649,6 +781,7 @@ class MusicAudioHandler {
 
   Future<void> dispose() async {
     _crossfadeTimer?.cancel();
+    _stuckAtEndWatchdog?.cancel();
     _stopPeriodicSave();
     await _flushSession();
     await _positionSub?.cancel();

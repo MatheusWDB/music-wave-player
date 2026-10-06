@@ -54,7 +54,7 @@ class _Placeholder extends StatelessWidget {
       color: colorScheme.primaryContainer,
       child: Padding(
         padding: const EdgeInsets.all(8.0),
-        child: Image.asset('assets/icon/icon (1).png', fit: BoxFit.contain),
+        child: Image.asset('assets/icon/icon.png', fit: BoxFit.contain),
       ),
     );
   }

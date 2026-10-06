@@ -129,9 +129,9 @@ class IndexingNotifier extends _$IndexingNotifier {
     // respeitadas — mesma ordem de inicialização do Configuration original.
     final playbackState = await ref.read(playbackNotifierProvider.future);
     if (tracks.isNotEmpty) {
-      ref
+      await ref
           .read(queueNotifierProvider.notifier)
-          .regenerate(
+          .restoreOrRegenerate(
             tracks: tracks,
             shuffleActive: playbackState.isShuffleActive,
             currentTrackId: playbackState.lastPlayedMusicId,
@@ -162,7 +162,10 @@ class IndexingNotifier extends _$IndexingNotifier {
     if (lastTrack != null) {
       final isAlreadyPlaying = audioHandler.player.state.playing;
       if (!isAlreadyPlaying) {
-        await audioHandler.loadTrack(lastTrack.path);
+        await audioHandler.loadTrack(
+          lastTrack.path,
+          knownLufs: lastTrack.loudnessLufs,
+        );
       } else {
         ref.read(playbackNotifierProvider.notifier).syncPlayingState(true);
       }

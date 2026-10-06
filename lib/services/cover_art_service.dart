@@ -9,10 +9,13 @@ import 'package:path_provider/path_provider.dart';
 ///   - .m4a / .mp4: caixa `covr` dentro de moov/udta/meta/ilst
 ///   - .mp3: frame APIC dentro do tag ID3v2
 class CoverArtService {
-  /// Diretório onde as capas são salvas.
+  /// Diretório onde as capas são salvas. Usa Application Support (não
+  /// Temporary/cache) — o diretório de cache pode ser limpo pelo Android
+  /// a qualquer momento sob pouco espaço, ou em reinstalações, apagando
+  /// as capas extraídas mesmo com o banco ainda apontando pra elas.
   static Future<Directory> get _coversDir async {
-    final cache = await getTemporaryDirectory();
-    final dir = Directory('${cache.path}/covers');
+    final support = await getApplicationSupportDirectory();
+    final dir = Directory('${support.path}/covers');
     if (!await dir.exists()) await dir.create(recursive: true);
     return dir;
   }

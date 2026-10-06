@@ -56,6 +56,15 @@ class BackgroundTaskService {
     if (permission != NotificationPermission.granted) {
       await FlutterForegroundTask.requestNotificationPermission();
     }
+
+    // Se o app crashou com uma indexação/restore em andamento, o `stop()`
+    // do `finally` nunca roda e a notificação pode ficar presa. Como o
+    // processo acabou de reiniciar, `_activeCount` já nasce zerado — então
+    // se o Android reporta o serviço como "rodando" mesmo assim, é sobra
+    // de uma sessão anterior, não um estado real desta sessão.
+    if (await FlutterForegroundTask.isRunningService) {
+      await FlutterForegroundTask.stopService();
+    }
   }
 
   /// Contador de quem está "segurando" o foreground — indexação e restore

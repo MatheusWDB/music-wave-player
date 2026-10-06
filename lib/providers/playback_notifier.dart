@@ -10,6 +10,7 @@ part 'playback_notifier.g.dart';
 
 const String _kLastPlayedMusicIdKey = 'lastPlayedMusicId';
 const String _kLastSeekPositionMsKey = 'lastSeekPositionMs';
+const String _kShuffleActiveKey = 'shuffleActive';
 
 /// Estado imutável de reprodução: faixa atual, posição, duração, repeat
 /// e histórico de reproduzidas recentemente.
@@ -74,6 +75,7 @@ class PlaybackNotifier extends _$PlaybackNotifier {
     return PlaybackState(
       lastPlayedMusicId: prefs.getInt(_kLastPlayedMusicIdKey),
       lastSeekPositionMs: prefs.getInt(_kLastSeekPositionMsKey) ?? 0,
+      isShuffleActive: prefs.getBool(_kShuffleActiveKey) ?? false,
       recentlyPlayedIds: recentlyPlayedIds,
     );
   }
@@ -86,6 +88,10 @@ class PlaybackNotifier extends _$PlaybackNotifier {
     required String? trackPath,
     bool regenerateQueue = true,
     bool autoplay = true,
+    // true só quando essa troca de faixa veio do fim natural da anterior
+    // (ver trackDidFinish) — único caso em que o fade ao iniciar deve
+    // acontecer. Retomar da pausa e pular manualmente ficam sem fade.
+    bool isAutoAdvance = false,
   }) async {
     final current = state.valueOrNull;
     if (current == null) return;
@@ -129,7 +135,7 @@ class PlaybackNotifier extends _$PlaybackNotifier {
 
       if (autoplay) {
         state = AsyncData(state.valueOrNull!.copyWith(isPlaying: true));
-        audioHandler.play();
+        audioHandler.play(isAutoAdvance: isAutoAdvance);
       } else {
         state = AsyncData(state.valueOrNull!.copyWith(isPlaying: false));
       }
@@ -139,7 +145,7 @@ class PlaybackNotifier extends _$PlaybackNotifier {
     // Mesma faixa que já está carregada: só retoma se estava pausada.
     if (autoplay && !current.isPlaying) {
       state = AsyncData(current.copyWith(isPlaying: true));
-      audioHandler.play();
+      audioHandler.play(isAutoAdvance: isAutoAdvance);
     }
   }
 
@@ -260,7 +266,10 @@ class PlaybackNotifier extends _$PlaybackNotifier {
     }
   }
 
-  void playNextTrack({required List<MusicTrack> indexedTracks}) {
+  void playNextTrack({
+    required List<MusicTrack> indexedTracks,
+    bool isAutoAdvance = false,
+  }) {
     final queueNotifier = ref.read(queueNotifierProvider.notifier);
     final queueState = ref.read(queueNotifierProvider);
     final queue = queueState.playbackQueue;
@@ -270,17 +279,36 @@ class PlaybackNotifier extends _$PlaybackNotifier {
     if (current == null) return;
 
     int next = queueState.currentQueueIndex + 1;
+    var effectiveQueue = queue;
     if (next >= queue.length) {
       if (current.repeatMode == 'All') {
+        if (current.isShuffleActive) {
+          // Sem isso, dar a volta tocaria a mesma sequência embaralhada
+          // do ciclo anterior, começando pelo que já tinha acabado de
+          // tocar — reembaralha pra parecer uma nova rodada de verdade.
+          queueNotifier.reshuffleAll();
+          effectiveQueue = ref.read(queueNotifierProvider).playbackQueue;
+        }
         next = 0;
       } else {
+        // Fila acabou e não tem repeat: limpa de vez em vez de deixar a
+        // última faixa marcada como atual/pausada.
         ref.read(musicAudioHandlerProvider).pause();
+        queueNotifier.clearAll();
+        state = AsyncData(
+          current.copyWith(
+            clearLastPlayedMusicId: true,
+            currentPositionMs: 0,
+            trackDurationMs: 0,
+            isPlaying: false,
+          ),
+        );
         return;
       }
     }
 
     queueNotifier.setCurrentIndex(next);
-    final trackId = queue[next];
+    final trackId = effectiveQueue[next];
     final track = indexedTracks.where((t) => t.id == trackId).firstOrNull;
     if (track == null) return;
 
@@ -289,6 +317,7 @@ class PlaybackNotifier extends _$PlaybackNotifier {
       indexedTracks: indexedTracks,
       trackPath: track.path,
       regenerateQueue: false,
+      isAutoAdvance: isAutoAdvance,
     );
   }
 
@@ -348,11 +377,12 @@ class PlaybackNotifier extends _$PlaybackNotifier {
           current.lastPlayedMusicId!,
           indexedTracks: indexedTracks,
           trackPath: track.path,
+          isAutoAdvance: true,
         );
       }
       return;
     }
-    playNextTrack(indexedTracks: indexedTracks);
+    playNextTrack(indexedTracks: indexedTracks, isAutoAdvance: true);
   }
 
   void toggleShuffle() {
@@ -371,6 +401,7 @@ class PlaybackNotifier extends _$PlaybackNotifier {
     }
 
     state = AsyncData(current.copyWith(isShuffleActive: nowActive));
+    _saveShuffleActive(nowActive);
   }
 
   // ── Coordenação com a fila ────────────────────────────────────────────────
@@ -486,5 +517,10 @@ class PlaybackNotifier extends _$PlaybackNotifier {
   Future<void> _saveLastSeekPosition(int ms) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setInt(_kLastSeekPositionMsKey, ms);
+  }
+
+  Future<void> _saveShuffleActive(bool active) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_kShuffleActiveKey, active);
   }
 }

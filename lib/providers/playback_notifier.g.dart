@@ -6,7 +6,7 @@ part of 'playback_notifier.dart';
 // RiverpodGenerator
 // **************************************************************************
 
-String _$playbackNotifierHash() => r'2c4e1fc9c671c906eda7d132f6afc3e18ed34eb6';
+String _$playbackNotifierHash() => r'70f853ba3e1904730efd2b1735debfd4ad1a5fc7';
 
 /// Coordena as ações de reprodução: play, pause, next, previous, repeat.
 /// Substitui o antigo [PlaybackController] — depende de [QueueNotifier]
