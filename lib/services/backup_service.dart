@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -7,17 +8,20 @@ import 'package:music_wave_player/data/music_database.dart';
 import 'package:music_wave_player/data/play_session_database.dart';
 import 'package:music_wave_player/data/playlist_database.dart';
 import 'package:music_wave_player/models/music_track.dart';
+import 'package:music_wave_player/models/playlist.dart';
+import 'package:music_wave_player/providers/custom_images_provider.dart';
 import 'package:music_wave_player/providers/equalizer_notifier.dart';
 import 'package:music_wave_player/providers/indexing_notifier.dart';
 import 'package:music_wave_player/providers/player_settings_notifier.dart';
 import 'package:music_wave_player/providers/sort_notifier.dart';
 import 'package:music_wave_player/services/background_task_service.dart';
+import 'package:music_wave_player/services/custom_image_service.dart';
 import 'package:music_wave_player/services/equalizer_service.dart';
 import 'package:music_wave_player/services/sort_service.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 const String _kBackupFormat = 'MWP_BACKUP';
-const int _kBackupVersion = 1;
+const int _kBackupVersion = 2;
 
 // ── Resultado do parse ───────────────────────────────────────────────────────
 
@@ -88,17 +92,34 @@ class BackupPlaySession {
   });
 }
 
+/// Imagem personalizada embutida no backup (base64). [key] é o nome da
+/// playlist (não o id, que muda entre aparelhos), o nome do artista ou
+/// 'álbum|artista'.
+class BackupCustomImage {
+  final String type;
+  final String key;
+  final String data;
+
+  const BackupCustomImage({
+    required this.type,
+    required this.key,
+    required this.data,
+  });
+}
+
 class BackupData {
   final Map<String, dynamic> settings;
   final List<BackupTrackMeta> trackMeta;
   final List<BackupPlaylist> playlists;
   final List<BackupPlaySession> playSessions;
+  final List<BackupCustomImage> customImages;
 
   const BackupData({
     required this.settings,
     required this.trackMeta,
     required this.playlists,
     required this.playSessions,
+    this.customImages = const [],
   });
 }
 
@@ -129,6 +150,7 @@ class RestoreSummary {
   final int trackMetaUnmatched;
   final int sessionsRestored;
   final int sessionsUnmatched;
+  final int imagesRestored;
 
   const RestoreSummary({
     required this.playlistsRestored,
@@ -137,6 +159,7 @@ class RestoreSummary {
     required this.trackMetaUnmatched,
     required this.sessionsRestored,
     required this.sessionsUnmatched,
+    this.imagesRestored = 0,
   });
 }
 
@@ -169,8 +192,9 @@ class BackupService {
   /// indexação (que por si só tem sua própria contagem de 3 etapas).
   static final ValueNotifier<bool> isRestoring = ValueNotifier(false);
 
-  /// Reindexação da biblioteca, avaliações/ocultas, playlists, sessões.
-  static const _restoreTotalStages = 4;
+  /// Reindexação da biblioteca, avaliações/ocultas, playlists, sessões,
+  /// imagens personalizadas.
+  static const _restoreTotalStages = 5;
 
   /// Formata e manda o texto de progresso pra notificação — chamado a
   /// cada item das etapas 2-4; o throttle de frequência já é feito
@@ -268,9 +292,41 @@ class BackupService {
           })
           .whereType<Map<String, dynamic>>()
           .toList(),
+      'customImages': await _exportCustomImages(playlists),
     };
 
     return const JsonEncoder.withIndent('  ').convert(json);
+  }
+
+  /// Embute as imagens personalizadas (já reduzidas a ~800px no momento da
+  /// escolha) em base64. Playlists são identificadas pelo nome, já que o id
+  /// não sobrevive a um aparelho novo. Imagens cujo arquivo sumiu são
+  /// ignoradas.
+  static Future<List<Map<String, dynamic>>> _exportCustomImages(
+    List<Playlist> playlists,
+  ) async {
+    final rows = await MusicDatabase.instance.readAllCustomImages();
+    final playlistNameById = {for (final p in playlists) '${p.id}': p.name};
+    final result = <Map<String, dynamic>>[];
+
+    for (final row in rows) {
+      final type = row[MusicDatabase.columnEntityType] as String;
+      var key = row[MusicDatabase.columnEntityKey] as String;
+      if (type == CustomImageType.playlist.name) {
+        final name = playlistNameById[key];
+        if (name == null) continue;
+        key = name;
+      }
+
+      final file = File(row[MusicDatabase.columnImagePath] as String);
+      if (!await file.exists()) continue;
+      result.add({
+        'type': type,
+        'key': key,
+        'data': base64Encode(await file.readAsBytes()),
+      });
+    }
+    return result;
   }
 
   // ── Parse ───────────────────────────────────────────────────────────────
@@ -327,12 +383,24 @@ class BackupService {
           )
           .toList();
 
+      // Ausente em backups da versão 1.
+      final customImages = ((map['customImages'] as List?) ?? [])
+          .map(
+            (e) => BackupCustomImage(
+              type: e['type'] as String,
+              key: e['key'] as String,
+              data: e['data'] as String,
+            ),
+          )
+          .toList();
+
       return BackupParseResult.success(
         BackupData(
           settings: settings,
           trackMeta: trackMeta,
           playlists: playlists,
           playSessions: playSessions,
+          customImages: customImages,
         ),
       );
     } catch (e) {
@@ -506,6 +574,44 @@ class BackupService {
       sessionsRestored++;
     }
 
+    // Imagens personalizadas — playlists são resolvidas pelo nome, depois de
+    // restauradas na etapa 3 (o id pode ser diferente do original).
+    final restoredPlaylists = await PlaylistDatabase.instance
+        .readAllPlaylists();
+    final playlistIdByName = {for (final p in restoredPlaylists) p.name: p.id!};
+    int imagesRestored = 0;
+    for (var i = 0; i < data.customImages.length; i++) {
+      final image = data.customImages[i];
+      progress.value = RestoreProgress(
+        stage: 'Restaurando imagens personalizadas',
+        done: i,
+        total: data.customImages.length,
+        stageIndex: 5,
+        stageTotal: _restoreTotalStages,
+      );
+      _notifyRestoreProgress(progress.value!);
+
+      final type = CustomImageType.values
+          .where((t) => t.name == image.type)
+          .firstOrNull;
+      if (type == null) continue;
+
+      var key = image.key;
+      if (type == CustomImageType.playlist) {
+        final playlistId = playlistIdByName[key];
+        if (playlistId == null) continue;
+        key = '$playlistId';
+      }
+
+      try {
+        await CustomImageService.saveBytes(type, key, base64Decode(image.data));
+        imagesRestored++;
+      } catch (e) {
+        debugPrint('[Backup] imagem personalizada ignorada ($key): $e');
+      }
+    }
+    await ref.read(customImagesProvider.notifier).reload();
+
     // Recarrega para refletir ratings/hidden/faixas reindexadas na UI.
     await ref.read(indexingNotifierProvider.notifier).loadIndexedTracks();
 
@@ -516,6 +622,7 @@ class BackupService {
       trackMetaUnmatched: metaUnmatched,
       sessionsRestored: sessionsRestored,
       sessionsUnmatched: sessionsUnmatched,
+      imagesRestored: imagesRestored,
     );
   }
 

@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:music_wave_player/components/grouped_entity_tile.dart';
 import 'package:music_wave_player/models/music_track.dart';
+import 'package:music_wave_player/providers/custom_images_provider.dart';
 import 'package:music_wave_player/screens/artist_detail_screen.dart';
+import 'package:music_wave_player/services/custom_image_service.dart';
 
-class ArtistsTab extends StatelessWidget {
+class ArtistsTab extends ConsumerWidget {
   final List<MusicTrack> tracks;
   final Future<void> Function(int) onTrackTap;
 
@@ -26,7 +29,8 @@ class ArtistsTab extends StatelessWidget {
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final images = ref.watch(customImagesProvider);
     final grouped = _groupByArtist();
     final artists = grouped.keys.toList();
 
@@ -40,7 +44,10 @@ class ArtistsTab extends StatelessWidget {
         final artistTracks = grouped[artist]!;
 
         return GroupedEntityTile(
-          leading: const EntityAvatarIcon(icon: Icons.person),
+          leading: EntityAvatarIcon(
+            icon: Icons.person,
+            imagePath: images.pathFor(CustomImageType.artist, artist),
+          ),
           title: artist,
           subtitle:
               '${artistTracks.length} música${artistTracks.length == 1 ? '' : 's'}',

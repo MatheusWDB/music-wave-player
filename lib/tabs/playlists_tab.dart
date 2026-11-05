@@ -1,11 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:music_wave_player/components/cover_art_widget.dart';
 import 'package:music_wave_player/data/playlist_database.dart';
 import 'package:music_wave_player/models/music_track.dart';
 import 'package:music_wave_player/models/playlist.dart';
+import 'package:music_wave_player/providers/custom_images_provider.dart';
 import 'package:music_wave_player/providers/indexing_notifier.dart';
 import 'package:music_wave_player/providers/playback_notifier.dart';
 import 'package:music_wave_player/screens/playlist_detail_screen.dart';
+import 'package:music_wave_player/services/custom_image_service.dart';
 import 'package:music_wave_player/services/favorites_service.dart';
 import 'package:music_wave_player/services/sort_service.dart';
 
@@ -114,6 +117,9 @@ class _PlaylistsTabState extends ConsumerState<PlaylistsTab> {
     );
     if (confirm != true) return;
     await PlaylistDatabase.instance.deletePlaylist(playlist.id!);
+    await ref
+        .read(customImagesProvider.notifier)
+        .remove(CustomImageType.playlist, '${playlist.id}');
     await _load();
   }
 
@@ -138,6 +144,7 @@ class _PlaylistsTabState extends ConsumerState<PlaylistsTab> {
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
+    final images = ref.watch(customImagesProvider);
 
     if (_loading) return const Center(child: CircularProgressIndicator());
 
@@ -180,26 +187,36 @@ class _PlaylistsTabState extends ConsumerState<PlaylistsTab> {
               separatorBuilder: (_, __) => const SizedBox(height: 8),
               itemBuilder: (context, index) {
                 final playlist = sorted[index];
+                final customPath = images.pathFor(
+                  CustomImageType.playlist,
+                  '${playlist.id}',
+                );
                 final isFavorites =
                     playlist.name == FavoritesService.favoritesName;
                 return Card(
                   child: ListTile(
-                    leading: Container(
-                      width: 44,
-                      height: 44,
-                      decoration: BoxDecoration(
-                        color: colorScheme.primaryContainer,
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Icon(
-                        isFavorites
-                            ? Icons.favorite
-                            : Icons.library_music_outlined,
-                        color: isFavorites
-                            ? colorScheme.error
-                            : colorScheme.onPrimaryContainer,
-                      ),
-                    ),
+                    leading: customPath != null
+                        ? CoverArtWidget(
+                            coverPath: customPath,
+                            size: 44,
+                            borderRadius: BorderRadius.circular(8),
+                          )
+                        : Container(
+                            width: 44,
+                            height: 44,
+                            decoration: BoxDecoration(
+                              color: colorScheme.primaryContainer,
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Icon(
+                              isFavorites
+                                  ? Icons.favorite
+                                  : Icons.library_music_outlined,
+                              color: isFavorites
+                                  ? colorScheme.error
+                                  : colorScheme.onPrimaryContainer,
+                            ),
+                          ),
                     title: Text(
                       playlist.name,
                       maxLines: 1,

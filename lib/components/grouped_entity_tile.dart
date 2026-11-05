@@ -46,18 +46,32 @@ class GroupedEntityTile extends StatelessWidget {
 }
 
 /// Avatar circular usado como [leading] em [GroupedEntityTile] para
-/// artistas (sem capa de imagem).
+/// artistas. Mostra a imagem personalizada ([imagePath]) quando existe;
+/// senão, o ícone.
 class EntityAvatarIcon extends StatelessWidget {
   final IconData icon;
+  final String? imagePath;
 
-  const EntityAvatarIcon({super.key, required this.icon});
+  const EntityAvatarIcon({super.key, required this.icon, this.imagePath});
 
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
+    final fallback = Icon(icon, color: colorScheme.onPrimaryContainer);
+
     return CircleAvatar(
       backgroundColor: colorScheme.primaryContainer,
-      child: Icon(icon, color: colorScheme.onPrimaryContainer),
+      child: imagePath == null
+          ? fallback
+          : ClipOval(
+              child: Image.file(
+                File(imagePath!),
+                fit: BoxFit.cover,
+                width: 40,
+                height: 40,
+                errorBuilder: (_, __, ___) => fallback,
+              ),
+            ),
     );
   }
 }

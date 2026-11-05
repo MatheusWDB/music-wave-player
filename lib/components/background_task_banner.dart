@@ -34,11 +34,11 @@ class BackgroundTaskBanner extends ConsumerWidget {
 
             if (isIndexing) {
               final info = IndexingStatusInfo.from(indexingState!);
-              // Durante um restore, a reindexação é a etapa 1 de 4 do
+              // Durante um restore, a reindexação é a etapa 1 de 5 do
               // restore como um todo — não das 3 etapas da indexação
               // isolada, que não fazem sentido pro usuário nesse contexto.
               final stagePrefix = isRestoring
-                  ? 'Etapa 1/4'
+                  ? 'Etapa 1/5'
                   : 'Etapa ${info.stageIndex}/${info.stageTotal}';
               label = '$stagePrefix · ${info.statusText}';
               percent = info.progressValue;

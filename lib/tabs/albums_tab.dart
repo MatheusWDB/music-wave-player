@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:music_wave_player/components/grouped_entity_tile.dart';
 import 'package:music_wave_player/models/music_track.dart';
+import 'package:music_wave_player/providers/custom_images_provider.dart';
 import 'package:music_wave_player/screens/album_detail_screen.dart';
+import 'package:music_wave_player/services/custom_image_service.dart';
 
-class AlbumsTab extends StatelessWidget {
+class AlbumsTab extends ConsumerWidget {
   final List<MusicTrack> tracks;
   final Future<void> Function(int) onTrackTap;
 
@@ -20,7 +23,8 @@ class AlbumsTab extends StatelessWidget {
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final images = ref.watch(customImagesProvider);
     final grouped = _groupByAlbum();
     final albums = grouped.keys.toList();
 
@@ -32,12 +36,18 @@ class AlbumsTab extends StatelessWidget {
       itemBuilder: (context, index) {
         final album = albums[index];
         final albumTracks = grouped[album]!;
-        final coverPath = albumTracks
-            .firstWhere(
-              (t) => t.coverPath != null,
-              orElse: () => albumTracks.first,
-            )
-            .coverPath;
+        final customPath = images.pathFor(
+          CustomImageType.album,
+          CustomImageService.albumKey(album, albumTracks.first.artist),
+        );
+        final coverPath =
+            customPath ??
+            albumTracks
+                .firstWhere(
+                  (t) => t.coverPath != null,
+                  orElse: () => albumTracks.first,
+                )
+                .coverPath;
 
         return GroupedEntityTile(
           leading: EntityCoverThumbnail(

@@ -1,14 +1,18 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:music_wave_player/components/cover_art_widget.dart';
+import 'package:music_wave_player/components/custom_image_options_sheet.dart';
+import 'package:music_wave_player/components/editable_image_frame.dart';
 import 'package:music_wave_player/components/listening_stats_section.dart';
 import 'package:music_wave_player/components/rating_bottom_sheet.dart';
 import 'package:music_wave_player/data/play_session_database.dart';
 import 'package:music_wave_player/models/music_track.dart';
 import 'package:music_wave_player/providers/current_track_provider.dart';
+import 'package:music_wave_player/providers/custom_images_provider.dart';
 import 'package:music_wave_player/providers/indexing_notifier.dart';
 import 'package:music_wave_player/providers/playback_notifier.dart';
 import 'package:music_wave_player/providers/queue_notifier.dart';
+import 'package:music_wave_player/services/custom_image_service.dart';
 
 class AlbumDetailScreen extends ConsumerStatefulWidget {
   final String album;
@@ -147,6 +151,10 @@ class _AlbumDetailScreenState extends ConsumerState<AlbumDetailScreen> {
         .firstWhere((t) => t.coverPath != null, orElse: () => _tracks.first)
         .coverPath;
     final artist = widget.tracks.first.artist;
+    final albumKey = CustomImageService.albumKey(widget.album, artist);
+    final customPath = ref
+        .watch(customImagesProvider)
+        .pathFor(CustomImageType.album, albumKey);
 
     return Scaffold(
       appBar: AppBar(
@@ -196,10 +204,15 @@ class _AlbumDetailScreenState extends ConsumerState<AlbumDetailScreen> {
             padding: const EdgeInsets.all(20),
             child: Row(
               children: [
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(12),
+                EditableImageFrame(
+                  onTap: () => CustomImageOptionsSheet.show(
+                    context,
+                    ref,
+                    type: CustomImageType.album,
+                    entityKey: albumKey,
+                  ),
                   child: CoverArtWidget(
-                    coverPath: coverPath,
+                    coverPath: customPath ?? coverPath,
                     size: 80,
                     borderRadius: BorderRadius.circular(12),
                   ),

@@ -1,14 +1,20 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:music_wave_player/components/cover_art_widget.dart';
+import 'package:music_wave_player/components/custom_image_options_sheet.dart';
+import 'package:music_wave_player/components/editable_image_frame.dart';
 import 'package:music_wave_player/components/listening_stats_section.dart';
 import 'package:music_wave_player/components/rating_bottom_sheet.dart';
 import 'package:music_wave_player/data/play_session_database.dart';
 import 'package:music_wave_player/models/music_track.dart';
 import 'package:music_wave_player/providers/current_track_provider.dart';
+import 'package:music_wave_player/providers/custom_images_provider.dart';
 import 'package:music_wave_player/providers/indexing_notifier.dart';
 import 'package:music_wave_player/providers/playback_notifier.dart';
 import 'package:music_wave_player/providers/queue_notifier.dart';
+import 'package:music_wave_player/services/custom_image_service.dart';
 
 class ArtistDetailScreen extends ConsumerStatefulWidget {
   final String artist;
@@ -144,6 +150,14 @@ class _ArtistDetailScreenState extends ConsumerState<ArtistDetailScreen> {
     final currentTrackId = ref.watch(currentTrackProvider)?.id;
     final ids = _tracks.map((t) => t.id!).toList();
     final totalArtistSeconds = _totalSecondsForArtist;
+    final customPath = ref
+        .watch(customImagesProvider)
+        .pathFor(CustomImageType.artist, widget.artist);
+    final avatarFallback = Icon(
+      Icons.person,
+      size: 40,
+      color: colorScheme.onPrimaryContainer,
+    );
 
     return Scaffold(
       appBar: AppBar(
@@ -193,13 +207,27 @@ class _ArtistDetailScreenState extends ConsumerState<ArtistDetailScreen> {
             padding: const EdgeInsets.all(20),
             child: Row(
               children: [
-                CircleAvatar(
-                  radius: 40,
-                  backgroundColor: colorScheme.primaryContainer,
-                  child: Icon(
-                    Icons.person,
-                    size: 40,
-                    color: colorScheme.onPrimaryContainer,
+                EditableImageFrame(
+                  onTap: () => CustomImageOptionsSheet.show(
+                    context,
+                    ref,
+                    type: CustomImageType.artist,
+                    entityKey: widget.artist,
+                  ),
+                  child: CircleAvatar(
+                    radius: 40,
+                    backgroundColor: colorScheme.primaryContainer,
+                    child: customPath == null
+                        ? avatarFallback
+                        : ClipOval(
+                            child: Image.file(
+                              File(customPath),
+                              fit: BoxFit.cover,
+                              width: 80,
+                              height: 80,
+                              errorBuilder: (_, __, ___) => avatarFallback,
+                            ),
+                          ),
                   ),
                 ),
                 const SizedBox(width: 16),

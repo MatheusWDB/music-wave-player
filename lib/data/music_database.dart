@@ -23,6 +23,12 @@ class MusicDatabase {
   static const String columnLoudnessLufs = 'loudness_lufs';
   static const String columnEffectiveEndMs = 'effective_end_ms';
 
+  // Imagens personalizadas de playlist/artista/álbum
+  static const String tableCustomImages = 'custom_images';
+  static const String columnEntityType = 'entity_type';
+  static const String columnEntityKey = 'entity_key';
+  static const String columnImagePath = 'image_path';
+
   Future<Database> get database async {
     if (_database != null) return _database!;
     _database = await _initDB('music_wave.db');
@@ -34,7 +40,7 @@ class MusicDatabase {
     final path = join(dbPath, filePath);
     return await openDatabase(
       path,
-      version: 9,
+      version: 10,
       onCreate: _createDB,
       onUpgrade: _upgradeDB,
     );
@@ -56,6 +62,18 @@ class MusicDatabase {
         $columnAddedAt       TEXT,
         $columnLoudnessLufs  REAL,
         $columnEffectiveEndMs INTEGER
+      )
+    ''');
+    await _createCustomImagesTable(db);
+  }
+
+  Future<void> _createCustomImagesTable(Database db) {
+    return db.execute('''
+      CREATE TABLE IF NOT EXISTS $tableCustomImages (
+        $columnEntityType TEXT NOT NULL,
+        $columnEntityKey  TEXT NOT NULL,
+        $columnImagePath  TEXT NOT NULL,
+        PRIMARY KEY ($columnEntityType, $columnEntityKey)
       )
     ''');
   }
@@ -104,6 +122,52 @@ class MusicDatabase {
         'ALTER TABLE $tableTracks ADD COLUMN $columnEffectiveEndMs INTEGER',
       );
     }
+    if (oldVersion < 10) {
+      await _createCustomImagesTable(db);
+    }
+  }
+
+  // ── Imagens personalizadas ────────────────────────────────────────────────
+
+  /// Retorna o caminho da imagem personalizada, ou null se não houver.
+  Future<String?> readCustomImagePath(String type, String key) async {
+    final db = await instance.database;
+    final rows = await db.query(
+      tableCustomImages,
+      columns: [columnImagePath],
+      where: '$columnEntityType = ? AND $columnEntityKey = ?',
+      whereArgs: [type, key],
+      limit: 1,
+    );
+    return rows.isEmpty ? null : rows.first[columnImagePath] as String;
+  }
+
+  /// Todas as imagens personalizadas — usado no export de backup.
+  Future<List<Map<String, Object?>>> readAllCustomImages() async {
+    final db = await instance.database;
+    return db.query(tableCustomImages);
+  }
+
+  Future<void> upsertCustomImage(
+    String type,
+    String key,
+    String imagePath,
+  ) async {
+    final db = await instance.database;
+    await db.insert(tableCustomImages, {
+      columnEntityType: type,
+      columnEntityKey: key,
+      columnImagePath: imagePath,
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
+  }
+
+  Future<void> deleteCustomImage(String type, String key) async {
+    final db = await instance.database;
+    await db.delete(
+      tableCustomImages,
+      where: '$columnEntityType = ? AND $columnEntityKey = ?',
+      whereArgs: [type, key],
+    );
   }
 
   /// Insere ou atualiza as faixas recebidas sem remover nada do banco.

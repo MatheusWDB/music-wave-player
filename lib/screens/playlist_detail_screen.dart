@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:music_wave_player/components/custom_image_options_sheet.dart';
 import 'package:music_wave_player/components/playlist_header_card.dart';
 import 'package:music_wave_player/components/playlist_track_tile.dart';
 import 'package:music_wave_player/components/rating_bottom_sheet.dart';
@@ -8,9 +9,11 @@ import 'package:music_wave_player/data/playlist_database.dart';
 import 'package:music_wave_player/models/music_track.dart';
 import 'package:music_wave_player/models/playlist.dart';
 import 'package:music_wave_player/providers/current_track_provider.dart';
+import 'package:music_wave_player/providers/custom_images_provider.dart';
 import 'package:music_wave_player/providers/indexing_notifier.dart';
 import 'package:music_wave_player/providers/playback_notifier.dart';
 import 'package:music_wave_player/providers/queue_notifier.dart';
+import 'package:music_wave_player/services/custom_image_service.dart';
 import 'package:music_wave_player/services/favorites_service.dart';
 
 class PlaylistDetailScreen extends ConsumerStatefulWidget {
@@ -154,6 +157,9 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
         const <MusicTrack>[];
     final tracks = _getTracks(allTracks);
     final ids = tracks.map((t) => t.id!).toList();
+    final customPath = ref
+        .watch(customImagesProvider)
+        .pathFor(CustomImageType.playlist, '${_playlist.id}');
 
     return Scaffold(
       appBar: AppBar(
@@ -222,7 +228,15 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
               children: [
                 PlaylistHeaderCard(
                   name: _playlist.name,
-                  coverPath: tracks.isNotEmpty ? tracks.first.coverPath : null,
+                  coverPath:
+                      customPath ??
+                      (tracks.isNotEmpty ? tracks.first.coverPath : null),
+                  onCoverTap: () => CustomImageOptionsSheet.show(
+                    context,
+                    ref,
+                    type: CustomImageType.playlist,
+                    entityKey: '${_playlist.id}',
+                  ),
                   trackCount: tracks.length,
                   durationLabel: _formatDuration(
                     tracks.fold(0, (sum, t) => sum + t.durationMs),
