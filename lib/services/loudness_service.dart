@@ -51,4 +51,33 @@ class LoudnessService {
       await player.dispose();
     }
   }
+
+  /// Tolerância (em LU) para dois scans serem considerados iguais.
+  static const _agreement = 0.5;
+
+  /// Escaneia a faixa e só devolve o valor quando dois scans concordam; se
+  /// os dois primeiros divergirem, um terceiro desempata. Um scan isolado já
+  /// gravou medições erradas (ex.: -24,6 LUFS em vez de -8,5) que nunca eram
+  /// revalidadas. Sem consenso devolve null: a faixa fica sem loudness e é
+  /// tentada de novo na próxima indexação.
+  ///
+  /// [scanner] existe para os testes trocarem o scan nativo.
+  static Future<double?> scanVerified(
+    String path, {
+    Future<double?> Function(String path) scanner = scan,
+  }) async {
+    bool agree(double a, double b) => (a - b).abs() <= _agreement;
+
+    final first = await scanner(path);
+    if (first == null) return null;
+
+    final second = await scanner(path);
+    if (second != null && agree(first, second)) return second;
+
+    final third = await scanner(path);
+    if (third == null) return null;
+    if (agree(third, first)) return third;
+    if (second != null && agree(third, second)) return third;
+    return null;
+  }
 }

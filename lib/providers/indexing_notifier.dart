@@ -128,8 +128,9 @@ class IndexingNotifier extends _$IndexingNotifier {
     // para que a faixa/posição restauradas da última sessão sejam
     // respeitadas — mesma ordem de inicialização do Configuration original.
     final playbackState = await ref.read(playbackNotifierProvider.future);
+    String? queueRestoreInfo;
     if (tracks.isNotEmpty) {
-      await ref
+      queueRestoreInfo = await ref
           .read(queueNotifierProvider.notifier)
           .restoreOrRegenerate(
             tracks: tracks,
@@ -141,6 +142,12 @@ class IndexingNotifier extends _$IndexingNotifier {
     // Aplica crossfade/fade/equalizador salvos assim que o app abre —
     // antes disso o audio handler está com os valores padrão (desligado).
     final audioHandler = ref.read(musicAudioHandlerProvider);
+    // DIAGNÓSTICO TEMPORÁRIO — remover junto com o resto
+    audioHandler.diag(
+      'abertura do app: faixaSalva=${playbackState.lastPlayedMusicId}, '
+      'posiçãoSalva=${playbackState.lastSeekPositionMs}ms, '
+      '${queueRestoreInfo ?? "biblioteca vazia, fila não montada"}',
+    );
     final playerSettings = await ref.read(
       playerSettingsNotifierProvider.future,
     );
@@ -311,7 +318,11 @@ class IndexingNotifier extends _$IndexingNotifier {
         final merged = [...c.indexedTracks];
         for (final track in newTracks) {
           final index = merged.indexWhere((t) => t.id == track.id);
-          if (index >= 0) {
+          // A indexação devolve também as faixas ocultas, que não devem
+          // aparecer na biblioteca.
+          if (track.isHidden) {
+            if (index >= 0) merged.removeAt(index);
+          } else if (index >= 0) {
             merged[index] = track;
           } else {
             merged.add(track);
@@ -334,16 +345,17 @@ class IndexingNotifier extends _$IndexingNotifier {
       onComplete: (tracks, scanDate) {
         final c = state.valueOrNull;
         if (c == null) return;
+        final visible = tracks.where((t) => !t.isHidden).toList();
         state = AsyncData(
           c.copyWith(
-            indexedTracks: tracks,
-            indexedFileCount: tracks.length,
-            indexedFileTotal: tracks.length,
+            indexedTracks: visible,
+            indexedFileCount: visible.length,
+            indexedFileTotal: visible.length,
             indexingStatus: IndexingStatus.complete,
             lastScanDate: scanDate,
           ),
         );
-        _regenerateQueue(tracks);
+        _regenerateQueue(visible);
         _saveLastScanDate(scanDate);
         unawaited(BackgroundTaskService.stop());
       },
@@ -356,11 +368,14 @@ class IndexingNotifier extends _$IndexingNotifier {
     );
   }
 
+  /// Ajusta a fila às faixas visíveis da biblioteca sem refazê-la do zero:
+  /// preserva o histórico e a faixa atual (antes, qualquer indexação,
+  /// ocultar ou reexibir recriava a fila e perdia a ordem do que já tocou).
   void _regenerateQueue(List<MusicTrack> tracks) {
     final playbackState = ref.read(playbackNotifierProvider).valueOrNull;
     ref
         .read(queueNotifierProvider.notifier)
-        .regenerate(
+        .syncWithLibrary(
           tracks: tracks,
           shuffleActive: playbackState?.isShuffleActive ?? false,
           currentTrackId: playbackState?.lastPlayedMusicId,

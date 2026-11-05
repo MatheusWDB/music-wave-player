@@ -6,7 +6,7 @@ plugins {
 }
 android {
     namespace = "br.com.hematsu.music_wave_player"
-    compileSdk = flutter.compileSdkVersion
+    compileSdk = 37
     ndkVersion = flutter.ndkVersion
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11

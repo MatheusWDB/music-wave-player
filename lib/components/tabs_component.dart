@@ -64,9 +64,12 @@ class TabsComponent extends ConsumerWidget {
   Widget _buildContent(WidgetRef ref, List<MusicTrack> tracks, SortState sort) {
     switch (activeIndex) {
       case 0:
+        // A fila precisa seguir a mesma ordem exibida na tela, e não a ordem
+        // de indexação.
+        final sorted = SortService.apply(tracks, sort.musics);
         return MusicsTab(
-          tracks: SortService.apply(tracks, sort.musics),
-          onTrackTap: (id) => _onTrackTap(ref, id, tracks),
+          tracks: sorted,
+          onTrackTap: (id) => _onTrackTap(ref, id, sorted),
         );
       case 1:
         return PlaylistsTab(sortOption: sort.playlists);

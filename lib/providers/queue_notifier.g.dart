@@ -6,13 +6,10 @@ part of 'queue_notifier.dart';
 // RiverpodGenerator
 // **************************************************************************
 
-String _$queueNotifierHash() => r'25fe1498b13b3fc9e2ffbae7ac310358761e51ce';
+String _$queueNotifierHash() => r'aead16c5762bbc0182a292aa2927e906436b270e';
 
-/// Estado e operações da fila de reprodução. Substitui o antigo
-/// [QueueManager] — síncrono, mas com persistência própria em
-/// SharedPreferences (ver [_persist]/[restoreOrRegenerate]), já que a
-/// fila deixou de ser só reconstruída a partir das faixas indexadas a
-/// cada carregamento do app.
+/// Estado e operações da fila de reprodução, com persistência própria em
+/// SharedPreferences (ver [_persist]/[restoreOrRegenerate]).
 ///
 /// Copied from [QueueNotifier].
 @ProviderFor(QueueNotifier)

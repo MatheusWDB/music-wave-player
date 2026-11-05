@@ -264,6 +264,7 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
                                       track.id!,
                                       indexedTracks: allTracks,
                                       trackPath: track.path,
+                                      contextTracks: tracks,
                                     );
                               },
                             );

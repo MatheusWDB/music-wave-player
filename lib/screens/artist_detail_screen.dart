@@ -398,6 +398,7 @@ class _ArtistDetailScreenState extends ConsumerState<ArtistDetailScreen> {
                                 track.id!,
                                 indexedTracks: allTracks,
                                 trackPath: track.path,
+                                contextTracks: _tracks,
                               );
                         },
                       );

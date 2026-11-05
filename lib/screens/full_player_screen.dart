@@ -31,6 +31,9 @@ class FullPlayerScreen extends ConsumerStatefulWidget {
 class _FullPlayerScreenState extends ConsumerState<FullPlayerScreen>
     with SingleTickerProviderStateMixin {
   double? _draggingValue;
+  bool _hadTrack = false;
+  bool _closing = false;
+  bool _initialTrackStarted = false;
 
   @override
   Widget build(BuildContext context) {
@@ -50,8 +53,22 @@ class _FullPlayerScreenState extends ConsumerState<FullPlayerScreen>
         MediaQuery.of(context).orientation == Orientation.landscape;
 
     if (currentTrack == null) {
+      // A fila acabou (sem repeat) com o player aberto: volta para a
+      // biblioteca em vez de recriar a fila.
+      if (_hadTrack) {
+        if (!_closing) {
+          _closing = true;
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) Navigator.of(context).maybePop();
+          });
+        }
+        return const Scaffold(body: SizedBox.shrink());
+      }
+      // A faixa inicial é tocada uma única vez por abertura da tela.
       if (widget.initialTrackId != null &&
+          !_initialTrackStarted &&
           playbackState?.lastPlayedMusicId != widget.initialTrackId) {
+        _initialTrackStarted = true;
         WidgetsBinding.instance.addPostFrameCallback((_) {
           final track = indexedTracks
               .where((t) => t.id == widget.initialTrackId)
@@ -73,6 +90,8 @@ class _FullPlayerScreenState extends ConsumerState<FullPlayerScreen>
         body: const Center(child: Text('Nenhuma faixa selecionada.')),
       );
     }
+
+    _hadTrack = true;
 
     final coverWidget = CoverArtWidget(
       coverPath: currentTrack.coverPath,

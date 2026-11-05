@@ -155,7 +155,7 @@ class IndexingService {
       final track = pending[i];
       if (track.id != null) {
         try {
-          final lufs = await LoudnessService.scan(track.path);
+          final lufs = await LoudnessService.scanVerified(track.path);
           if (lufs != null) {
             await MusicDatabase.instance.updateLoudness(track.id!, lufs);
           }

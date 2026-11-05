@@ -78,6 +78,7 @@ class MusicAudioHandler {
     );
     _initListeners();
     _applyGapless();
+    _diag('MusicAudioHandler criado (processo/engine iniciado)');
   }
 
   Future<void> _applyGapless() async {
@@ -156,6 +157,31 @@ class MusicAudioHandler {
       // Log é só diagnóstico — nunca deve derrubar a reprodução.
     }
   }
+
+  /// Log de diagnóstico geral do player (avanço de faixa, watchdog,
+  /// comandos). Vai pro mesmo arquivo do [_logLoudness], com a tag [Player]
+  /// pra diferenciar. TEMPORÁRIO — remover junto com o resto do diagnóstico.
+  void _diag(String message) {
+    debugPrint('[Player] $message');
+    unawaited(_logLoudness('[Player] $message'));
+  }
+
+  /// Versão pública de [_diag], pra PlaybackNotifier/QueueNotifier
+  /// registrarem no mesmo arquivo de log.
+  void diag(String message) => _diag(message);
+
+  /// Foto dos valores de volume que o plugin enxerga — soft (0-100),
+  /// pré-amp em dB da normalização, e volume/mudo do mixer do sistema
+  /// (null se o backend de áudio não expõe).
+  String _audioSnapshot() {
+    final st = player.state;
+    return 'vol=${st.volume} ganho=${st.volumeGain}dB '
+        'sistema=${st.systemVolume} mudoSistema=${st.systemMute}';
+  }
+
+  // Último snapshot logado pelo timer periódico — só loga quando muda,
+  // pra pegar deriva de volume durante a reprodução sem encher o arquivo.
+  String? _lastAudioSnapshot;
 
   /// Aplica o pré-amp (setVolumeGain) calculado a partir do loudness
   /// integrado (LUFS) da faixa atual, usando -18 LUFS como referência
@@ -289,7 +315,9 @@ class MusicAudioHandler {
           _effectiveEndTriggered = true;
           // Corte abrupto no ponto exato soa estranho (ex: cauda de
           // reverb ainda decaindo). Um fade curto disfarça a transição.
-          unawaited(_fadeOut(2).then((_) => _finishTrack()));
+          unawaited(
+            _fadeOut(2).then((_) => _finishTrack(reason: 'effectiveEnd')),
+          );
         }
       }
 
@@ -302,19 +330,46 @@ class MusicAudioHandler {
       if (!_trackFinishEmitted && durationMs > 0) {
         final remainingMs = durationMs - pos.inMilliseconds;
         if (remainingMs <= 300) {
+          if (_stuckAtEndWatchdog == null) {
+            _diag(
+              'watchdog ARMADO (restante=${remainingMs}ms, '
+              'pos=${pos.inMilliseconds}ms, dur=${durationMs}ms, '
+              'tocando=${player.state.playing})',
+            );
+          }
           _stuckAtEndWatchdog ??= Timer(const Duration(seconds: 2), () {
             _stuckAtEndWatchdog = null;
-            if (_trackFinishEmitted) return;
-            if (!player.state.playing) return; // pausa deliberada, não mexe
+            if (_trackFinishEmitted) {
+              _diag(
+                'watchdog disparou mas faixa já tinha terminado — ignorado',
+              );
+              return;
+            }
+            if (!player.state.playing) {
+              _diag('watchdog disparou mas player está pausado — ignorado');
+              return; // pausa deliberada, não mexe
+            }
             final nowRemaining =
                 player.state.duration.inMilliseconds -
                 player.state.position.inMilliseconds;
             // Saiu da janela de "perto do fim" (seek, nova faixa já
             // carregada etc.) — não é mais o mesmo travamento.
-            if (nowRemaining > 300) return;
-            _finishTrack();
+            if (nowRemaining > 300) {
+              _diag(
+                'watchdog disparou mas saiu da janela de fim '
+                '(restante agora=${nowRemaining}ms) — ignorado',
+              );
+              return;
+            }
+            _diag('watchdog FORÇANDO avanço (restante=${nowRemaining}ms)');
+            _finishTrack(reason: 'watchdog');
           });
         } else {
+          if (_stuckAtEndWatchdog != null) {
+            _diag(
+              'watchdog CANCELADO (restante=${remainingMs}ms, saiu do fim)',
+            );
+          }
           _stuckAtEndWatchdog?.cancel();
           _stuckAtEndWatchdog = null;
         }
@@ -336,6 +391,7 @@ class MusicAudioHandler {
       } else {
         _pauseSession();
         _stopPeriodicSave();
+        _savePositionOnPause();
       }
       _ref.read(playbackNotifierProvider.notifier).syncPlayingState(playing);
       player.setMediaSession(_mediaSessionFor(playing: playing));
@@ -392,10 +448,14 @@ class MusicAudioHandler {
         // situação agora é o SilenceDetectionService (effectiveEndMs).
       }
 
-      _finishTrack();
+      _finishTrack(reason: 'completed-nativo');
     });
 
     _mediaCommandSub = player.stream.mediaSessionCommands.listen((command) {
+      _diag(
+        'MediaSession comando: ${command.runtimeType} '
+        '(pausedAtTrackEnd=$_pausedAtTrackEnd)',
+      );
       switch (command) {
         case MediaSessionCommandNext():
           skipToNext();
@@ -429,17 +489,45 @@ class MusicAudioHandler {
     });
   }
 
+  /// Salva a posição de retomada sempre que o player pausa — inclusive
+  /// pausas vindas da notificação/tela de bloqueio/fone, que o plugin
+  /// aplica direto no nativo e nunca passavam pelo botão de pause do app
+  /// (único lugar que salvava). Ignora o fim da faixa (posição no último
+  /// segundo e meio, ou fim já emitido), pra não gravar o "final" como
+  /// ponto de retomada.
+  void _savePositionOnPause() {
+    if (_trackFinishEmitted) return;
+    final durationMs = player.state.duration.inMilliseconds;
+    final positionMs = player.state.position.inMilliseconds;
+    if (durationMs <= 0 || positionMs >= durationMs - 1500) return;
+    _diag('posição salva ao pausar: ${positionMs}ms de ${durationMs}ms');
+    unawaited(
+      _ref
+          .read(playbackNotifierProvider.notifier)
+          .saveCurrentPositionForResume(positionMs),
+    );
+  }
+
   /// Avança para a próxima faixa (ou pausa, se o temporizador determinou
   /// isso ao chegar no fim). Compartilhado entre o "completed" nativo do
   /// mpv, o gatilho de effectiveEndMs (silêncio final detectado) e o
   /// watchdog de faixa travada no fim.
-  void _finishTrack() {
-    if (_trackFinishEmitted) return;
+  void _finishTrack({required String reason}) {
+    if (_trackFinishEmitted) {
+      _diag('_finishTrack($reason) ignorado: já emitido pra essa faixa');
+      return;
+    }
     _trackFinishEmitted = true;
 
     final shouldPause = _ref
         .read(timerNotifierProvider.notifier)
         .onTrackFinished();
+    _diag(
+      '_finishTrack($reason): temporizador manda pausar=$shouldPause, '
+      'tocando=${player.state.playing}, '
+      'pos=${player.state.position.inMilliseconds}ms, '
+      'dur=${player.state.duration.inMilliseconds}ms',
+    );
     if (shouldPause) {
       _pausedAtTrackEnd = true;
       player.pause();
@@ -627,6 +715,11 @@ class MusicAudioHandler {
   /// setVolumeGain), fazendo a faixa soar mais alta/baixa que o normal
   /// logo no início.
   Future<void> play({bool isAutoAdvance = false}) async {
+    _diag(
+      'play() chamado (autoAdvance=$isAutoAdvance, '
+      'pos=${player.state.position.inMilliseconds}ms, '
+      'dur=${player.state.duration.inMilliseconds}ms, ${_audioSnapshot()})',
+    );
     if (_fadeOnPauseResume && isAutoAdvance && !_crossfadeInProgress) {
       // Fade ao avançar naturalmente: zera volume, toca, sobe gradualmente
       await player.setVolume(0);
@@ -643,6 +736,10 @@ class MusicAudioHandler {
   }
 
   Future<void> pause() async {
+    _diag(
+      'pause() chamado (pos=${player.state.position.inMilliseconds}ms, '
+      'dur=${player.state.duration.inMilliseconds}ms, ${_audioSnapshot()})',
+    );
     if (_fadeOnPauseResume && !_crossfadeInProgress) {
       await _fadeOut(1);
       await player.pause();
@@ -652,19 +749,47 @@ class MusicAudioHandler {
     }
   }
 
-  Future<void> seek(Duration position) => player.seek(position);
+  Future<void> seek(Duration position) async {
+    await player.seek(position);
+    _saveSeekForResume(position);
+  }
+
+  // Seek explícito (reiniciar a faixa, slider, notificação) não passa pela
+  // pausa nem pelo salvamento periódico; sem gravar aqui, a retomada volta
+  // a um ponto antigo. Mesma regra do _savePositionOnPause: não grava perto
+  // do fim.
+  void _saveSeekForResume(Duration position) {
+    final durationMs = player.state.duration.inMilliseconds;
+    final positionMs = position.inMilliseconds;
+    if (durationMs <= 0 || positionMs >= durationMs - 1500) return;
+    unawaited(
+      _ref
+          .read(playbackNotifierProvider.notifier)
+          .saveCurrentPositionForResume(positionMs),
+    );
+  }
 
   Future<void> setSpeed(double speed) => player.setRate(speed);
 
-  Future<void> skipToNext() async => _ref
-      .read(playbackNotifierProvider.notifier)
-      .playNextTrack(indexedTracks: _indexedTracks);
+  Future<void> skipToNext() async {
+    _diag('skipToNext() chamado');
+    _ref
+        .read(playbackNotifierProvider.notifier)
+        .playNextTrack(indexedTracks: _indexedTracks);
+  }
 
-  Future<void> skipToPrevious() async => _ref
-      .read(playbackNotifierProvider.notifier)
-      .playPreviousTrack(indexedTracks: _indexedTracks);
+  Future<void> skipToPrevious() async {
+    _diag('skipToPrevious() chamado');
+    _ref
+        .read(playbackNotifierProvider.notifier)
+        .playPreviousTrack(indexedTracks: _indexedTracks);
+  }
 
   Future<void> stop() async {
+    _diag(
+      'stop() chamado (pos=${player.state.position.inMilliseconds}ms, '
+      'dur=${player.state.duration.inMilliseconds}ms)',
+    );
     _crossfadeTimer?.cancel();
     _stopPeriodicSave();
     await _flushSession();
@@ -769,6 +894,11 @@ class MusicAudioHandler {
           .read(playbackNotifierProvider.notifier)
           .saveCurrentPositionForResume(player.state.position.inMilliseconds);
       await _saveSessionDelta();
+      final snap = _audioSnapshot();
+      if (snap != _lastAudioSnapshot) {
+        _lastAudioSnapshot = snap;
+        _diag('volume mudou durante reprodução: $snap');
+      }
     });
   }
 

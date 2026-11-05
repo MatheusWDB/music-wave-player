@@ -96,8 +96,10 @@ class _SmoothProgressSliderState extends ConsumerState<SmoothProgressSlider>
     if (isPlaying && !_ticker.isAnimating) {
       _lastTickTime = DateTime.now();
       _ticker.forward();
-    } else if (!isPlaying && _ticker.isAnimating) {
-      _ticker.stop();
+    } else if (!isPlaying) {
+      if (_ticker.isAnimating) _ticker.stop();
+      // Pausado não há ticker interpolando, então vale a posição real,
+      // inclusive depois de um seek (ex.: reiniciar a faixa pausada).
       _smoothPosition = positionMs.toDouble();
     }
 

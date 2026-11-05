@@ -407,6 +407,7 @@ class _AlbumDetailScreenState extends ConsumerState<AlbumDetailScreen> {
                                 track.id!,
                                 indexedTracks: allTracks,
                                 trackPath: track.path,
+                                contextTracks: _tracks,
                               );
                         },
                       );
