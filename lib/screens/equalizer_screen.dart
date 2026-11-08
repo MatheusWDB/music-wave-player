@@ -119,8 +119,6 @@ class _PresetSelector extends ConsumerWidget {
                 onSelected: (_) => ref
                     .read(equalizerNotifierProvider.notifier)
                     .setPreset(preset),
-                selectedColor: colorScheme.primaryContainer,
-                checkmarkColor: colorScheme.primary,
               ),
             );
           }),

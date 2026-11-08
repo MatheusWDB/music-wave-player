@@ -30,8 +30,6 @@ class PeriodFilterBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -45,8 +43,6 @@ class PeriodFilterBar extends StatelessWidget {
                 label: Text(p.$2),
                 selected: isSelected,
                 onSelected: (_) => onPeriodSelected(p.$1),
-                selectedColor: colorScheme.primaryContainer,
-                checkmarkColor: colorScheme.primary,
               ),
             );
           }),
@@ -58,8 +54,6 @@ class PeriodFilterBar extends StatelessWidget {
                 label: Text('$year'),
                 selected: isSelected,
                 onSelected: (_) => onYearSelected(year),
-                selectedColor: colorScheme.primaryContainer,
-                checkmarkColor: colorScheme.primary,
               ),
             );
           }),

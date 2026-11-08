@@ -39,5 +39,9 @@ class AppTheme {
       trackHeight: 3,
     ),
     iconTheme: const IconThemeData(color: AppColors.textSecondary),
+    chipTheme: const ChipThemeData(
+      selectedColor: AppColors.accent,
+      checkmarkColor: AppColors.bg,
+    ),
   );
 }
