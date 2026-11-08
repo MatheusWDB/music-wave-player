@@ -198,6 +198,7 @@ class PlaybackNotifier extends _$PlaybackNotifier {
     required List<MusicTrack> indexedTracks,
     required bool shuffleActive,
     required String? Function(int id) pathForId,
+    bool randomStart = false,
   }) async {
     if (playlist.trackIds.isEmpty) return;
     final validIds = playlist.trackIds
@@ -207,7 +208,11 @@ class PlaybackNotifier extends _$PlaybackNotifier {
 
     ref
         .read(queueNotifierProvider.notifier)
-        .setQueue(orderedIds: validIds, shuffleActive: shuffleActive);
+        .setQueue(
+          orderedIds: validIds,
+          shuffleActive: shuffleActive,
+          randomStart: randomStart,
+        );
     await _startFromQueueTop(pathForId: pathForId);
   }
 
@@ -215,6 +220,7 @@ class PlaybackNotifier extends _$PlaybackNotifier {
     List<MusicTrack> tracks, {
     required bool shuffleActive,
     required String? Function(int id) pathForId,
+    bool randomStart = false,
   }) async {
     final visibleIds = tracks
         .where((t) => !t.isHidden)
@@ -224,7 +230,11 @@ class PlaybackNotifier extends _$PlaybackNotifier {
 
     ref
         .read(queueNotifierProvider.notifier)
-        .setQueue(orderedIds: visibleIds, shuffleActive: shuffleActive);
+        .setQueue(
+          orderedIds: visibleIds,
+          shuffleActive: shuffleActive,
+          randomStart: randomStart,
+        );
     await _startFromQueueTop(pathForId: pathForId);
   }
 

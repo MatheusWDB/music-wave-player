@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:music_wave_player/components/cover_art_widget.dart';
 import 'package:music_wave_player/components/custom_image_options_sheet.dart';
 import 'package:music_wave_player/components/editable_image_frame.dart';
+import 'package:music_wave_player/components/list_play_button.dart';
 import 'package:music_wave_player/components/listening_stats_section.dart';
 import 'package:music_wave_player/components/rating_bottom_sheet.dart';
 import 'package:music_wave_player/data/play_session_database.dart';
@@ -251,8 +252,10 @@ class _ArtistDetailScreenState extends ConsumerState<ArtistDetailScreen> {
                   ),
                 ),
                 if (_tracks.isNotEmpty)
-                  FilledButton.icon(
-                    onPressed: () {
+                  ListPlayButton(
+                    tracks: _tracks,
+                    showShuffle: true,
+                    onStart: () {
                       final isShuffleActive =
                           ref
                               .read(playbackNotifierProvider)
@@ -265,11 +268,10 @@ class _ArtistDetailScreenState extends ConsumerState<ArtistDetailScreen> {
                             _tracks,
                             shuffleActive: isShuffleActive,
                             pathForId: _pathForId,
+                            randomStart: true,
                           );
                       Navigator.pop(context);
                     },
-                    icon: const Icon(Icons.play_arrow),
-                    label: const Text('Tocar'),
                   ),
               ],
             ),

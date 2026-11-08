@@ -6,7 +6,7 @@ part of 'queue_notifier.dart';
 // RiverpodGenerator
 // **************************************************************************
 
-String _$queueNotifierHash() => r'aead16c5762bbc0182a292aa2927e906436b270e';
+String _$queueNotifierHash() => r'5cae2899df4e81e4d8dd85772b534151aea7dcd0';
 
 /// Estado e operações da fila de reprodução, com persistência própria em
 /// SharedPreferences (ver [_persist]/[restoreOrRegenerate]).

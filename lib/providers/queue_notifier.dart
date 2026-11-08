@@ -222,7 +222,14 @@ class QueueNotifier extends _$QueueNotifier {
 
   /// Define uma nova fila ordenada, aplicando shuffle se necessário.
   /// Chamado ao tocar playlist, álbum ou artista.
-  void setQueue({required List<int> orderedIds, required bool shuffleActive}) {
+  /// Com [shuffleActive], a primeira faixa de [orderedIds] fica fixa no topo
+  /// (ex.: faixa tocada pelo usuário). Com [randomStart], nenhuma é fixada e
+  /// a fila toda é embaralhada (ex.: botão Play da lista com aleatório ligado).
+  void setQueue({
+    required List<int> orderedIds,
+    required bool shuffleActive,
+    bool randomStart = false,
+  }) {
     if (orderedIds.isEmpty) {
       state = const QueueState();
       unawaited(_persist());
@@ -230,9 +237,13 @@ class QueueNotifier extends _$QueueNotifier {
     }
     List<int> playbackQueue;
     if (shuffleActive && orderedIds.length > 1) {
-      final first = orderedIds.first;
-      final rest = orderedIds.sublist(1)..shuffle(Random());
-      playbackQueue = [first, ...rest];
+      if (randomStart) {
+        playbackQueue = List.of(orderedIds)..shuffle(Random());
+      } else {
+        final first = orderedIds.first;
+        final rest = orderedIds.sublist(1)..shuffle(Random());
+        playbackQueue = [first, ...rest];
+      }
     } else {
       playbackQueue = List.of(orderedIds);
     }

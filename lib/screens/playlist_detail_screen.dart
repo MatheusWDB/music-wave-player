@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:music_wave_player/components/custom_image_options_sheet.dart';
+import 'package:music_wave_player/components/list_play_button.dart';
 import 'package:music_wave_player/components/playlist_header_card.dart';
 import 'package:music_wave_player/components/playlist_track_tile.dart';
 import 'package:music_wave_player/components/rating_bottom_sheet.dart';
@@ -143,6 +144,7 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
           _playlist,
           indexedTracks: allTracks,
           shuffleActive: isShuffleActive,
+          randomStart: true,
           pathForId: (id) =>
               allTracks.where((t) => t.id == id).firstOrNull?.path,
         );
@@ -241,11 +243,15 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
                   durationLabel: _formatDuration(
                     tracks.fold(0, (sum, t) => sum + t.durationMs),
                   ),
-                  onPlay: tracks.isNotEmpty
-                      ? () async {
-                          await _playPlaylist(allTracks);
-                          if (context.mounted) Navigator.pop(context);
-                        }
+                  playButton: tracks.isNotEmpty
+                      ? ListPlayButton(
+                          tracks: tracks,
+                          showShuffle: true,
+                          onStart: () async {
+                            await _playPlaylist(allTracks);
+                            if (context.mounted) Navigator.pop(context);
+                          },
+                        )
                       : null,
                 ),
                 const Divider(height: 1),

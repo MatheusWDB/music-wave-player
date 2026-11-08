@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:music_wave_player/components/list_play_button.dart';
 import 'package:music_wave_player/components/tabs_sort_header.dart';
 import 'package:music_wave_player/models/music_track.dart';
 import 'package:music_wave_player/providers/indexing_notifier.dart';
@@ -25,29 +26,15 @@ class TabsComponent extends ConsumerWidget {
     'Álbuns',
   ];
 
-  static const _sortOptionsMusics = [
-    SortOption.titleAsc,
-    SortOption.titleDesc,
-    SortOption.artistAsc,
-    SortOption.artistDesc,
-    SortOption.ratingDesc,
-    SortOption.ratingAsc,
-    SortOption.random,
+  static const _sortFieldsMusics = [
+    SortField.title,
+    SortField.artist,
+    SortField.album,
+    SortField.added,
   ];
-  static const _sortOptionsPlaylists = [
-    SortOption.titleAsc,
-    SortOption.titleDesc,
-  ];
-  static const _sortOptionsArtists = [
-    SortOption.titleAsc,
-    SortOption.titleDesc,
-  ];
-  static const _sortOptionsAlbums = [
-    SortOption.titleAsc,
-    SortOption.titleDesc,
-    SortOption.artistAsc,
-    SortOption.artistDesc,
-  ];
+  static const _sortFieldsPlaylists = [SortField.title];
+  static const _sortFieldsArtists = [SortField.title];
+  static const _sortFieldsAlbums = [SortField.title, SortField.artist];
 
   Future<void> _onTrackTap(
     WidgetRef ref,
@@ -61,15 +48,40 @@ class TabsComponent extends ConsumerWidget {
         .playTrack(trackId, indexedTracks: tracks, trackPath: track.path);
   }
 
-  Widget _buildContent(WidgetRef ref, List<MusicTrack> tracks, SortState sort) {
+  /// Toca a lista exibida na ordem atual, respeitando o aleatório global.
+  Future<void> _playAll(WidgetRef ref, List<MusicTrack> tracks) {
+    final shuffleActive =
+        ref.read(playbackNotifierProvider).valueOrNull?.isShuffleActive ??
+        false;
+    final pathById = {
+      for (final t in tracks)
+        if (t.id != null) t.id!: t.path,
+    };
+    return ref
+        .read(playbackNotifierProvider.notifier)
+        .playTracks(
+          tracks,
+          shuffleActive: shuffleActive,
+          pathForId: (id) => pathById[id],
+          // Com aleatório ligado, começa de uma faixa sorteada (e não da
+          // primeira da lista).
+          randomStart: true,
+        );
+  }
+
+  Widget _buildContent(
+    WidgetRef ref,
+    List<MusicTrack> tracks,
+    SortState sort,
+    List<MusicTrack> musicsSorted,
+  ) {
     switch (activeIndex) {
       case 0:
         // A fila precisa seguir a mesma ordem exibida na tela, e não a ordem
         // de indexação.
-        final sorted = SortService.apply(tracks, sort.musics);
         return MusicsTab(
-          tracks: sorted,
-          onTrackTap: (id) => _onTrackTap(ref, id, sorted),
+          tracks: musicsSorted,
+          onTrackTap: (id) => _onTrackTap(ref, id, musicsSorted),
         );
       case 1:
         return PlaylistsTab(sortOption: sort.playlists);
@@ -99,12 +111,12 @@ class TabsComponent extends ConsumerWidget {
     _ => sort.musics,
   };
 
-  List<SortOption> _currentOptions() => switch (activeIndex) {
-    0 => _sortOptionsMusics,
-    1 => _sortOptionsPlaylists,
-    2 => _sortOptionsArtists,
-    3 => _sortOptionsAlbums,
-    _ => _sortOptionsMusics,
+  List<SortField> _currentFields() => switch (activeIndex) {
+    0 => _sortFieldsMusics,
+    1 => _sortFieldsPlaylists,
+    2 => _sortFieldsArtists,
+    3 => _sortFieldsAlbums,
+    _ => _sortFieldsMusics,
   };
 
   void _onSortSelected(WidgetRef ref, SortOption option) {
@@ -132,6 +144,15 @@ class TabsComponent extends ConsumerWidget {
     }
 
     final tracks = indexingState.indexedTracks;
+    final isShuffleActive = ref.watch(
+      playbackNotifierProvider.select(
+        (s) => s.valueOrNull?.isShuffleActive ?? false,
+      ),
+    );
+    final musicsSorted = activeIndex == 0
+        ? SortService.apply(tracks, sortState.musics)
+        : const <MusicTrack>[];
+    final showPlayControls = activeIndex == 0 && tracks.isNotEmpty;
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 18.0),
@@ -141,11 +162,25 @@ class TabsComponent extends ConsumerWidget {
           TabsSortHeader(
             title: _tabTitles[activeIndex],
             currentSort: _currentSort(sortState),
-            sortOptions: _currentOptions(),
+            sortFields: _currentFields(),
             onSortSelected: (option) => _onSortSelected(ref, option),
+            isShuffleActive: isShuffleActive,
+            onToggleShuffle: showPlayControls
+                ? () => ref
+                      .read(playbackNotifierProvider.notifier)
+                      .toggleShuffle()
+                : null,
+            playButton: showPlayControls
+                ? ListPlayButton(
+                    tracks: musicsSorted,
+                    onStart: () => _playAll(ref, musicsSorted),
+                  )
+                : null,
           ),
           tracks.isNotEmpty
-              ? Expanded(child: _buildContent(ref, tracks, sortState))
+              ? Expanded(
+                  child: _buildContent(ref, tracks, sortState, musicsSorted),
+                )
               : Expanded(
                   child: Center(
                     child: Padding(

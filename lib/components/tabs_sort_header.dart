@@ -1,21 +1,28 @@
 import 'package:flutter/material.dart';
+import 'package:music_wave_player/components/shuffle_toggle_button.dart';
 import 'package:music_wave_player/components/sort_button.dart';
 import 'package:music_wave_player/services/sort_service.dart';
 
-/// Cabeçalho de uma aba de listagem: título da aba à esquerda e botão de
-/// ordenação à direita.
+/// Cabeçalho de uma aba de listagem: título e menu de ordenação na primeira
+/// linha e, quando [playButton] é informado, aleatório e play logo abaixo.
 class TabsSortHeader extends StatelessWidget {
   final String title;
   final SortOption currentSort;
-  final List<SortOption> sortOptions;
+  final List<SortField> sortFields;
   final ValueChanged<SortOption> onSortSelected;
+  final Widget? playButton;
+  final VoidCallback? onToggleShuffle;
+  final bool isShuffleActive;
 
   const TabsSortHeader({
     super.key,
     required this.title,
     required this.currentSort,
-    required this.sortOptions,
+    required this.sortFields,
     required this.onSortSelected,
+    this.playButton,
+    this.onToggleShuffle,
+    this.isShuffleActive = false,
   });
 
   @override
@@ -24,23 +31,40 @@ class TabsSortHeader extends StatelessWidget {
 
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4.0),
-      child: Row(
+      child: Column(
         children: [
-          Expanded(
-            child: Text(
-              title,
-              style: TextStyle(
-                color: colorScheme.onSurfaceVariant,
-                fontSize: 13.0,
-                fontWeight: FontWeight.w500,
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  title,
+                  style: TextStyle(
+                    color: colorScheme.onSurfaceVariant,
+                    fontSize: 13.0,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
               ),
+              SortButton(
+                current: currentSort,
+                fields: sortFields,
+                onSelected: onSortSelected,
+              ),
+            ],
+          ),
+          if (playButton != null)
+            Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                if (onToggleShuffle != null)
+                  ShuffleToggleButton(
+                    isActive: isShuffleActive,
+                    onPressed: onToggleShuffle!,
+                  ),
+                const SizedBox(width: 8.0),
+                playButton!,
+              ],
             ),
-          ),
-          SortButton(
-            current: currentSort,
-            options: sortOptions,
-            onSelected: onSortSelected,
-          ),
         ],
       ),
     );

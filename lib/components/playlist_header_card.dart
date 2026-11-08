@@ -4,13 +4,13 @@ import 'package:music_wave_player/components/editable_image_frame.dart';
 
 /// Cabeçalho da tela de detalhe de playlist: capa (imagem personalizada ou
 /// da primeira faixa com capa disponível), nome, contagem de músicas,
-/// duração total e botão "Tocar". [onCoverTap] abre a edição da imagem.
+/// duração total e botão de play. [onCoverTap] abre a edição da imagem.
 class PlaylistHeaderCard extends StatelessWidget {
   final String name;
   final String? coverPath;
   final int trackCount;
   final String durationLabel;
-  final VoidCallback? onPlay;
+  final Widget? playButton;
   final VoidCallback? onCoverTap;
 
   const PlaylistHeaderCard({
@@ -19,7 +19,7 @@ class PlaylistHeaderCard extends StatelessWidget {
     required this.coverPath,
     required this.trackCount,
     required this.durationLabel,
-    required this.onPlay,
+    required this.playButton,
     this.onCoverTap,
   });
 
@@ -74,12 +74,7 @@ class PlaylistHeaderCard extends StatelessWidget {
               ],
             ),
           ),
-          if (onPlay != null)
-            FilledButton.icon(
-              onPressed: onPlay,
-              icon: const Icon(Icons.play_arrow),
-              label: const Text('Tocar'),
-            ),
+          if (playButton != null) playButton!,
         ],
       ),
     );
