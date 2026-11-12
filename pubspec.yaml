@@ -51,7 +51,8 @@ dependencies:
   riverpod_annotation: ^2.6.1
   google_fonts: ^8.2.1
   flutter_foreground_task: ^11.0.3
-
+  ytdlp_flutter: ^0.1.0
+  yt_extractor: ^0.1.0
 dev_dependencies:
   flutter_test:
     sdk: flutter

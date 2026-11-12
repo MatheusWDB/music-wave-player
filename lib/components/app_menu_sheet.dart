@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:music_wave_player/components/audio_transitions_bottom_sheet.dart';
 import 'package:music_wave_player/screens/backup_restore_screen.dart';
+import 'package:music_wave_player/screens/download_screen.dart';
 import 'package:music_wave_player/screens/equalizer_screen.dart';
 import 'package:music_wave_player/screens/hidden_tracks_screen.dart';
 import 'package:music_wave_player/screens/most_played_screen.dart';
@@ -50,6 +51,15 @@ class AppMenuSheet extends StatelessWidget {
               title: const Text('Biblioteca'),
               subtitle: const Text('Configurar pasta e reindexar'),
               onTap: () => _go(context, const RootDirectoryConfigScreen()),
+            ),
+            ListTile(
+              leading: Icon(
+                Icons.download_outlined,
+                color: colorScheme.primary,
+              ),
+              title: const Text('Baixar músicas'),
+              subtitle: const Text('Baixar áudio de um link do YouTube'),
+              onTap: () => _go(context, const DownloadScreen()),
             ),
             ListTile(
               leading: Icon(

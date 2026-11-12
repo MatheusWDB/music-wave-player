@@ -169,10 +169,16 @@ class IndexingNotifier extends _$IndexingNotifier {
     if (lastTrack != null) {
       final isAlreadyPlaying = audioHandler.player.state.playing;
       if (!isAlreadyPlaying) {
-        await audioHandler.loadTrack(
-          lastTrack.path,
-          knownLufs: lastTrack.loudnessLufs,
-        );
+        try {
+          await audioHandler.loadTrack(
+            lastTrack.path,
+            knownLufs: lastTrack.loudnessLufs,
+          );
+        } catch (e) {
+          // Falha ao restaurar a última faixa (ex: seek antes do arquivo
+          // carregar) não pode derrubar o carregamento da biblioteca inteira.
+          audioHandler.diag('falha ao restaurar a última faixa: $e');
+        }
       } else {
         ref.read(playbackNotifierProvider.notifier).syncPlayingState(true);
       }
@@ -226,6 +232,31 @@ class IndexingNotifier extends _$IndexingNotifier {
     } catch (_) {
       state = AsyncData(current.copyWith(indexingStatus: IndexingStatus.error));
     }
+  }
+
+  /// Adiciona à biblioteca um arquivo único já gravado na pasta raiz
+  /// (ex: música baixada), sem reindexar tudo. Retorna a faixa, ou null
+  /// se falhar.
+  Future<MusicTrack?> addTrackFromPath(String path) async {
+    final track = await IndexingService.indexSingleFile(path);
+    if (track == null) return null;
+
+    final current = state.valueOrNull;
+    if (current == null) return track;
+
+    final tracks = [
+      ...current.indexedTracks.where((t) => t.id != track.id),
+      track,
+    ];
+    state = AsyncData(
+      current.copyWith(
+        indexedTracks: tracks,
+        indexedFileCount: tracks.length,
+        indexingStatus: IndexingStatus.complete,
+      ),
+    );
+    _regenerateQueue(tracks);
+    return track;
   }
 
   Future<void> startIndexing() async {

@@ -138,6 +138,32 @@ class IndexingService {
     }
   }
 
+  /// Indexa um único arquivo recém-adicionado (ex: download): metadados,
+  /// duração, capa e loudness, sem varrer a biblioteca inteira.
+  /// Retorna a faixa salva, ou null se não foi possível salvá-la.
+  static Future<MusicTrack?> indexSingleFile(String path) async {
+    final basic = await MetadataParser.extractMetadata(path);
+    final saved = await _processTracksProgressively(
+      [basic],
+      onProgress: (_, _) {},
+      onLibraryBatch: (_) {},
+    );
+    if (saved.isEmpty) return null;
+
+    var track = saved.first;
+    try {
+      final lufs = await LoudnessService.scanVerified(track.path);
+      if (lufs != null && track.id != null) {
+        await MusicDatabase.instance.updateLoudness(track.id!, lufs);
+        track = track.copyWith(loudnessLufs: lufs);
+      }
+    } catch (_) {
+      // Sem loudness agora; a próxima indexação completa preenche.
+    }
+    await _triggerMediaScan(path);
+    return track;
+  }
+
   /// Calcula e persiste o loudness apenas das faixas que ainda não possuem
   /// (loudnessLufs == null). Faixas já salvas em reindexações anteriores
   /// são ignoradas — só o valor de loudness é preenchido, nunca a faixa

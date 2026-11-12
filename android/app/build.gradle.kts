@@ -11,6 +11,7 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
+        isCoreLibraryDesugaringEnabled = true
     }
     kotlinOptions {
         jvmTarget = JavaVersion.VERSION_11.toString()
@@ -25,6 +26,9 @@ android {
     buildTypes {
         release {
             signingConfig = signingConfigs.getByName("debug")
+            // O R8 quebra o yt-dlp (ytdlp_flutter), que usa reflexão.
+            isMinifyEnabled = false
+            isShrinkResources = false
         }
     }
     packagingOptions {
@@ -41,4 +45,5 @@ flutter {
 
 dependencies {
     implementation("androidx.documentfile:documentfile:1.0.1")
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs_nio:2.1.5")
 }
