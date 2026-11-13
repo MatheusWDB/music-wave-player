@@ -43,5 +43,13 @@ class AppTheme {
       selectedColor: AppColors.accent,
       checkmarkColor: AppColors.bg,
     ),
+    snackBarTheme: SnackBarThemeData(
+      backgroundColor: AppColors.surfaceElevated,
+      contentTextStyle: GoogleFonts.manrope(
+        color: AppColors.textPrimary,
+        fontSize: 14,
+      ),
+      behavior: SnackBarBehavior.floating,
+    ),
   );
 }
