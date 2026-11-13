@@ -213,7 +213,23 @@ class BackupService {
 
   // ── Export ──────────────────────────────────────────────────────────────
 
+  /// Gera o conteúdo do backup mantendo o processo em foreground, para a
+  /// exportação não ser suspensa se a tela bloquear ou o app for minimizado.
   static Future<String> buildBackup(WidgetRef ref) async {
+    unawaited(
+      BackgroundTaskService.start(
+        title: 'MusicWave Player',
+        text: 'Gerando backup...',
+      ),
+    );
+    try {
+      return await _buildBackupInternal(ref);
+    } finally {
+      unawaited(BackgroundTaskService.stop());
+    }
+  }
+
+  static Future<String> _buildBackupInternal(WidgetRef ref) async {
     final allTracks = await MusicDatabase.instance
         .readAllTracksIncludingHidden();
     final tracksById = {for (final t in allTracks) t.id: t};
