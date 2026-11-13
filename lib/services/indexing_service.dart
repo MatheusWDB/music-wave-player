@@ -10,9 +10,28 @@ import 'package:music_wave_player/models/music_track.dart';
 import 'package:music_wave_player/services/cover_art_service.dart';
 import 'package:music_wave_player/services/loudness_service.dart';
 import 'package:music_wave_player/services/metadata_parser.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 const String _kLastScanDateKey = 'lastScanDate';
+
+/// Resumo de uma recalculagem de loudness da biblioteca.
+class LoudnessRescanResult {
+  /// Faixas cujo valor salvo foi substituído por um valor diferente.
+  final int corrected;
+
+  /// Faixas em que o novo valor confirmou o que já estava salvo.
+  final int unchanged;
+
+  /// Faixas sem consenso entre os scans; o valor anterior foi mantido.
+  final int failed;
+
+  const LoudnessRescanResult({
+    required this.corrected,
+    required this.unchanged,
+    required this.failed,
+  });
+}
 
 /// Responsável por varrer o diretório raiz, extrair metadados e persistir
 /// as faixas no banco de dados.
@@ -191,6 +210,91 @@ class IndexingService {
       }
       onProgress(i + 1, pending.length);
     }
+  }
+
+  // DIAGNÓSTICO TEMPORÁRIO: grava no mesmo loudness_log.txt do player.
+  // Remover junto com o resto do diagnóstico de loudness.
+  static Future<void> _rescanLog(String message) async {
+    debugPrint('[Rescan] $message');
+    try {
+      final dir = await getExternalStorageDirectory();
+      if (dir == null) return;
+      final file = File('${dir.path}/loudness_log.txt');
+      final timestamp = DateTime.now().toIso8601String();
+      await file.writeAsString(
+        '$timestamp  [Rescan] $message\n',
+        mode: FileMode.append,
+      );
+    } catch (_) {
+      // Log é só diagnóstico — nunca deve derrubar o recálculo.
+    }
+  }
+
+  /// Diferença mínima (em LU) para substituir um loudness já salvo.
+  static const _rescanChangeThreshold = 0.5;
+
+  /// Reescaneia o loudness de todas as [tracks], mesmo as que já têm valor.
+  /// Só grava quando o novo valor (com consenso, ver
+  /// [LoudnessService.scanVerified]) difere do salvo; sem consenso, o valor
+  /// anterior é mantido. [onCorrected] avisa cada faixa atualizada no banco.
+  static Future<LoudnessRescanResult> rescanAllLoudness(
+    List<MusicTrack> tracks, {
+    required void Function(int done, int total) onProgress,
+    required void Function(int trackId, double lufs) onCorrected,
+  }) async {
+    var corrected = 0;
+    var unchanged = 0;
+    var failed = 0;
+
+    onProgress(0, tracks.length);
+    unawaited(_rescanLog('início: ${tracks.length} faixas'));
+
+    for (int i = 0; i < tracks.length; i++) {
+      final track = tracks[i];
+      final id = track.id;
+
+      double? lufs;
+      if (id != null) {
+        try {
+          lufs = await LoudnessService.scanVerified(track.path);
+        } catch (e) {
+          // Falha pontual numa faixa não deve interromper o restante.
+          unawaited(_rescanLog('erro em "${track.path}": $e'));
+        }
+      }
+
+      if (id == null || lufs == null) {
+        failed++;
+        unawaited(_rescanLog('sem consenso: "${track.path}"'));
+      } else {
+        final saved = track.loudnessLufs;
+        if (saved == null || (saved - lufs).abs() > _rescanChangeThreshold) {
+          await MusicDatabase.instance.updateLoudness(id, lufs);
+          onCorrected(id, lufs);
+          corrected++;
+          unawaited(_rescanLog('corrigida: "${track.path}" $saved -> $lufs'));
+        } else {
+          unchanged++;
+        }
+      }
+
+      onProgress(i + 1, tracks.length);
+      if ((i + 1) % 25 == 0) {
+        unawaited(_rescanLog('progresso: ${i + 1}/${tracks.length}'));
+      }
+    }
+
+    unawaited(
+      _rescanLog(
+        'fim: corrigidas=$corrected, iguais=$unchanged, sem consenso=$failed',
+      ),
+    );
+
+    return LoudnessRescanResult(
+      corrected: corrected,
+      unchanged: unchanged,
+      failed: failed,
+    );
   }
 
   /// Processa cada faixa por completo (duração + capa) e já salva no banco

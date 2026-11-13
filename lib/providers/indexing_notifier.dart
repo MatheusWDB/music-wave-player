@@ -399,6 +399,76 @@ class IndexingNotifier extends _$IndexingNotifier {
     );
   }
 
+  /// Recalcula o loudness de todas as faixas visíveis da biblioteca e
+  /// atualiza a lista em memória com os valores corrigidos. A faixa que está
+  /// tocando só passa a usar o novo ganho na próxima vez que for carregada.
+  /// Retorna null se não puder iniciar (biblioteca vazia ou operação em
+  /// andamento).
+  Future<LoudnessRescanResult?> rescanLoudness() async {
+    final current = state.valueOrNull;
+    if (current == null || current.isBusy || current.indexedTracks.isEmpty) {
+      return null;
+    }
+
+    final tracks = current.indexedTracks;
+    final correctedLufs = <int, double>{};
+
+    state = AsyncData(
+      current.copyWith(
+        indexingStatus: IndexingStatus.calculatingLoudness,
+        loudnessDone: 0,
+        loudnessTotal: tracks.length,
+      ),
+    );
+
+    unawaited(
+      BackgroundTaskService.start(
+        title: 'MusicWave Player',
+        text: 'Recalculando volume das músicas...',
+      ),
+    );
+
+    try {
+      return await IndexingService.rescanAllLoudness(
+        tracks,
+        onProgress: (done, total) {
+          final c = state.valueOrNull;
+          if (c == null) return;
+          state = AsyncData(
+            c.copyWith(loudnessDone: done, loudnessTotal: total),
+          );
+          unawaited(
+            BackgroundTaskService.update(
+              title: 'MusicWave Player',
+              text: 'Recalculando volume · $done/$total',
+            ),
+          );
+        },
+        onCorrected: (id, lufs) => correctedLufs[id] = lufs,
+      );
+    } finally {
+      final c = state.valueOrNull;
+      if (c != null) {
+        final merged = correctedLufs.isEmpty
+            ? c.indexedTracks
+            : c.indexedTracks
+                  .map(
+                    (t) => correctedLufs.containsKey(t.id)
+                        ? t.copyWith(loudnessLufs: correctedLufs[t.id])
+                        : t,
+                  )
+                  .toList();
+        state = AsyncData(
+          c.copyWith(
+            indexedTracks: merged,
+            indexingStatus: IndexingStatus.complete,
+          ),
+        );
+      }
+      unawaited(BackgroundTaskService.stop());
+    }
+  }
+
   /// Ajusta a fila às faixas visíveis da biblioteca sem refazê-la do zero:
   /// preserva o histórico e a faixa atual (antes, qualquer indexação,
   /// ocultar ou reexibir recriava a fila e perdia a ordem do que já tocou).

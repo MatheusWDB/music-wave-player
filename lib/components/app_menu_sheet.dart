@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:music_wave_player/components/audio_transitions_bottom_sheet.dart';
+import 'package:music_wave_player/providers/indexing_notifier.dart';
+import 'package:music_wave_player/services/indexing_service.dart';
 import 'package:music_wave_player/screens/backup_restore_screen.dart';
 import 'package:music_wave_player/screens/download_screen.dart';
 import 'package:music_wave_player/screens/equalizer_screen.dart';
@@ -11,7 +14,7 @@ import 'package:music_wave_player/screens/statistics_screen.dart';
 
 /// Bottom sheet de menu com atalhos para as telas secundárias do app
 /// (biblioteca, músicas ocultas, transições, estatísticas, backup, etc.).
-class AppMenuSheet extends StatelessWidget {
+class AppMenuSheet extends ConsumerWidget {
   const AppMenuSheet({super.key});
 
   void _go(BuildContext context, Widget screen) {
@@ -19,8 +22,56 @@ class AppMenuSheet extends StatelessWidget {
     Navigator.push(context, MaterialPageRoute(builder: (_) => screen));
   }
 
+  Future<void> _confirmRescanLoudness(
+    BuildContext context,
+    WidgetRef ref,
+  ) async {
+    // Capturados antes de fechar o menu: depois do pop, o context e o ref
+    // do sheet deixam de ser válidos.
+    final notifier = ref.read(indexingNotifierProvider.notifier);
+    final messenger = ScaffoldMessenger.of(context);
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Recalcular volume'),
+        content: const Text(
+          'Reescaneia o volume de todas as músicas para corrigir diferenças '
+          'entre faixas. Leva alguns minutos e roda em segundo plano.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Recalcular'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    if (context.mounted) Navigator.pop(context);
+    final result = await notifier.rescanLoudness();
+    messenger.showSnackBar(SnackBar(content: Text(_rescanSummary(result))));
+  }
+
+  String _rescanSummary(LoudnessRescanResult? result) {
+    if (result == null) {
+      return 'Não foi possível recalcular agora. Aguarde a operação em andamento.';
+    }
+    final failed = result.failed > 0 ? ', ${result.failed} sem consenso' : '';
+    return 'Volume recalculado: ${result.corrected} corrigidas, '
+        '${result.unchanged} já corretas$failed.';
+  }
+
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final isBusy = ref.watch(
+      indexingNotifierProvider.select((s) => s.valueOrNull?.isBusy ?? false),
+    );
     final colorScheme = Theme.of(context).colorScheme;
     final bottomInset = MediaQuery.of(context).padding.bottom;
 
@@ -84,6 +135,20 @@ class AppMenuSheet extends StatelessWidget {
               title: const Text('Equalizador'),
               subtitle: const Text('Ajustar graves, médios e agudos'),
               onTap: () => _go(context, const EqualizerScreen()),
+            ),
+            ListTile(
+              enabled: !isBusy,
+              leading: Icon(
+                Icons.volume_up_outlined,
+                color: colorScheme.primary,
+              ),
+              title: const Text('Recalcular volume'),
+              subtitle: Text(
+                isBusy
+                    ? 'Aguarde a operação em andamento'
+                    : 'Reescanear o volume de todas as músicas',
+              ),
+              onTap: () => _confirmRescanLoudness(context, ref),
             ),
             ListTile(
               leading: Icon(
