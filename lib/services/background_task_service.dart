@@ -1,4 +1,5 @@
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
+import 'package:music_wave_player/services/background_task_manager.dart';
 
 /// Mantém o processo do app em primeiro plano (via notificação persistente)
 /// durante operações longas — indexação da biblioteca e restore de backup —
@@ -17,6 +18,25 @@ class BackgroundTaskService {
   static const _serviceId = 1001;
   static bool _initialized = false;
 
+  /// Id do botão da notificação e mensagem enviada do isolate do handler
+  /// (onde o clique chega) para o isolate principal (onde as tarefas rodam).
+  static const _cancelAction = 'cancel_task';
+  static const _cancelButton = NotificationButton(
+    id: _cancelAction,
+    text: 'Cancelar',
+  );
+
+  /// Botão só aparece quando existe uma tarefa cancelável em andamento
+  /// (indexação, recálculo de volume, restore).
+  static List<NotificationButton> get _buttons =>
+      BackgroundTaskManager.primaryCancellable != null
+      ? const [_cancelButton]
+      : const [];
+
+  static void _onTaskData(Object data) {
+    if (data == _cancelAction) BackgroundTaskManager.cancelPrimary();
+  }
+
   /// Nome da meta-data declarada no AndroidManifest.xml, que aponta pro
   /// drawable do ícone de notificação (ic_notification, já gerado pelo
   /// flutter_launcher_icons). O ícone padrão do plugin, sem isso, é um
@@ -31,6 +51,7 @@ class BackgroundTaskService {
     _initialized = true;
 
     FlutterForegroundTask.initCommunicationPort();
+    FlutterForegroundTask.addTaskDataCallback(_onTaskData);
     FlutterForegroundTask.init(
       androidNotificationOptions: AndroidNotificationOptions(
         channelId: 'background_task_channel',
@@ -90,6 +111,7 @@ class BackgroundTaskService {
         notificationTitle: title,
         notificationText: text,
         notificationIcon: _notificationIcon,
+        notificationButtons: _buttons,
       );
       return;
     }
@@ -99,6 +121,7 @@ class BackgroundTaskService {
       notificationTitle: title,
       notificationText: text,
       notificationIcon: _notificationIcon,
+      notificationButtons: _buttons,
       callback: _startCallback,
     );
   }
@@ -129,6 +152,7 @@ class BackgroundTaskService {
       notificationTitle: title,
       notificationText: text,
       notificationIcon: _notificationIcon,
+      notificationButtons: _buttons,
     );
   }
 
@@ -146,15 +170,16 @@ class BackgroundTaskService {
   }
 }
 
-// Handler vazio — não faz nada periodicamente, só existe pra satisfazer a
-// exigência do plugin de um TaskHandler ao iniciar o serviço. O trabalho
-// de verdade (indexação/restore) roda na isolate principal, não aqui.
+// Handler que não executa trabalho periódico — só existe pra satisfazer a
+// exigência do plugin de um TaskHandler ao iniciar o serviço e repassar o
+// clique do botão da notificação. O trabalho de verdade
+// (indexação/restore) roda na isolate principal, não aqui.
 @pragma('vm:entry-point')
 void _startCallback() {
-  FlutterForegroundTask.setTaskHandler(_NoOpTaskHandler());
+  FlutterForegroundTask.setTaskHandler(_ActionTaskHandler());
 }
 
-class _NoOpTaskHandler extends TaskHandler {
+class _ActionTaskHandler extends TaskHandler {
   @override
   Future<void> onStart(DateTime timestamp, TaskStarter starter) async {}
 
@@ -163,4 +188,9 @@ class _NoOpTaskHandler extends TaskHandler {
 
   @override
   Future<void> onDestroy(DateTime timestamp, bool isTimeout) async {}
+
+  @override
+  void onNotificationButtonPressed(String id) {
+    FlutterForegroundTask.sendDataToMain(id);
+  }
 }

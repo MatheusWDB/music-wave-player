@@ -32,26 +32,19 @@ class _BackupRestoreScreenState extends ConsumerState<BackupRestoreScreen> {
     return 'musicwave_backup_$stamp';
   }
 
-  void _showSnack(String message, {bool isError = false}) {
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        behavior: SnackBarBehavior.floating,
-        backgroundColor: isError
-            ? Theme.of(context).colorScheme.error
-            : Theme.of(context).colorScheme.primary,
-      ),
-    );
-  }
+  // Usa o mesmo messenger global do restante do app, para manter a cor
+  // padrão dos avisos.
+  void _showSnack(String message, {bool isError = false}) =>
+      AppMessenger.show(message, isError: isError);
 
   // ── Export ────────────────────────────────────────────────────────────────
 
   Future<void> _shareBackup() async {
     if (_sharing) return;
     setState(() => _sharing = true);
+    final container = ProviderScope.containerOf(context, listen: false);
     try {
-      final content = await BackupService.buildBackup(ref);
+      final content = await BackupService.buildBackup(container);
 
       final dir = await getTemporaryDirectory();
       final fileName = '${_generateBaseFileName()}.mwp';
@@ -74,8 +67,9 @@ class _BackupRestoreScreenState extends ConsumerState<BackupRestoreScreen> {
   Future<void> _saveToFolder() async {
     if (_savingToFolder) return;
     setState(() => _savingToFolder = true);
+    final container = ProviderScope.containerOf(context, listen: false);
     try {
-      final content = await BackupService.buildBackup(ref);
+      final content = await BackupService.buildBackup(container);
       final bytes = Uint8List.fromList(utf8.encode(content));
 
       final savedPath = await FileSaver.instance.saveAs(
@@ -134,12 +128,26 @@ class _BackupRestoreScreenState extends ConsumerState<BackupRestoreScreen> {
   Future<void> _startRestore(BackupData data) async {
     AppMessenger.show('Restaurando backup em segundo plano...');
 
-    final summary = await BackupService.restore(data: data, ref: ref);
+    // O container vive mais que a tela; o `ref` do widget não pode ser
+    // usado depois que o usuário sai dela.
+    final container = ProviderScope.containerOf(context, listen: false);
+    final RestoreSummary summary;
+    try {
+      summary = await BackupService.restore(data: data, ref: container);
+    } catch (e, stack) {
+      // Sem isso, uma exceção aqui some em silêncio quando o usuário já
+      // saiu da tela (a chamada não é aguardada).
+      debugPrint('[Backup] restore falhou: $e\n$stack');
+      AppMessenger.show('Erro na restauração: $e', isError: true);
+      return;
+    }
 
     AppMessenger.show(
-      'Restauração concluída: ${summary.playlistsRestored} playlist${summary.playlistsRestored == 1 ? '' : 's'}, '
-      '${summary.tracksIndexed} faixa${summary.tracksIndexed == 1 ? '' : 's'} nova${summary.tracksIndexed == 1 ? '' : 's'}, '
-      '${summary.sessionsRestored} ${summary.sessionsRestored == 1 ? 'sessão' : 'sessões'}.',
+      summary.cancelled
+          ? 'Restauração cancelada. Restaure o mesmo backup de novo para completar.'
+          : 'Restauração concluída: ${summary.playlistsRestored} playlist${summary.playlistsRestored == 1 ? '' : 's'}, '
+                '${summary.tracksIndexed} faixa${summary.tracksIndexed == 1 ? '' : 's'} nova${summary.tracksIndexed == 1 ? '' : 's'}, '
+                '${summary.sessionsRestored} ${summary.sessionsRestored == 1 ? 'sessão' : 'sessões'}.',
     );
 
     if (mounted) {
@@ -177,8 +185,11 @@ class _BackupRestoreScreenState extends ConsumerState<BackupRestoreScreen> {
     return showDialog<void>(
       context: context,
       builder: (_) => AlertDialog(
-        title: const Text('Restauração concluída'),
+        title: Text(
+          summary.cancelled ? 'Restauração cancelada' : 'Restauração concluída',
+        ),
         content: Text(
+          '${summary.cancelled ? 'A restauração foi interrompida e aplicada só em parte. Restaure o mesmo backup de novo para completar.\n\n' : ''}'
           '${summary.playlistsRestored} playlist${summary.playlistsRestored == 1 ? '' : 's'} restaurada${summary.playlistsRestored == 1 ? '' : 's'}.\n'
           '${summary.tracksIndexed} faixa${summary.tracksIndexed == 1 ? '' : 's'} nova${summary.tracksIndexed == 1 ? '' : 's'} indexada${summary.tracksIndexed == 1 ? '' : 's'} da pasta de música.\n'
           '${summary.trackMetaMatched} música${summary.trackMetaMatched == 1 ? '' : 's'} com nota/oculta aplicada'

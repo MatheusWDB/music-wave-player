@@ -11,6 +11,9 @@ import 'package:music_wave_player/providers/playback_notifier.dart';
 import 'package:music_wave_player/providers/player_settings_notifier.dart';
 import 'package:music_wave_player/providers/queue_notifier.dart';
 import 'package:music_wave_player/services/indexing_service.dart';
+import 'package:music_wave_player/services/library_rename_service.dart';
+import 'package:music_wave_player/services/saf_service.dart';
+import 'package:music_wave_player/services/background_task_manager.dart';
 import 'package:music_wave_player/services/background_task_service.dart';
 import 'package:music_wave_player/services/metadata_repair_service.dart';
 import 'package:music_wave_player/services/favorites_service.dart';
@@ -259,9 +262,20 @@ class IndexingNotifier extends _$IndexingNotifier {
     return track;
   }
 
-  Future<void> startIndexing() async {
+  /// [taskId], [stagePrefix] e [cancelToken] existem para o restore de
+  /// backup: a reindexação aparece como a etapa 1 da tarefa de restore
+  /// (mesma linha no banner, mesmo botão de cancelar). Quando o chamador
+  /// passa o token, ele é o dono da tarefa e é quem a finaliza.
+  Future<void> startIndexing({
+    String taskId = BackgroundTaskIds.indexing,
+    String? stagePrefix,
+    TaskCancelToken? cancelToken,
+  }) async {
     final current = state.valueOrNull;
-    if (current == null || current.rootDirectory == null || current.isBusy) {
+    if (current == null ||
+        current.rootDirectory == null ||
+        current.isBusy ||
+        _isRenamingLibrary) {
       return;
     }
 
@@ -280,6 +294,28 @@ class IndexingNotifier extends _$IndexingNotifier {
       ),
     );
 
+    final ownsTask = cancelToken == null;
+    final token = cancelToken ?? TaskCancelToken();
+
+    void publishTask(String label, double? progress) {
+      BackgroundTaskManager.update(
+        BackgroundTask(
+          id: taskId,
+          label: label,
+          progress: progress,
+          cancelToken: token,
+        ),
+      );
+    }
+
+    void finishTask() {
+      if (ownsTask) BackgroundTaskManager.finish(taskId);
+      unawaited(BackgroundTaskService.stop());
+    }
+
+    // A tarefa é registrada antes do serviço para a notificação já nascer
+    // com o botão de cancelar.
+    publishTask('${stagePrefix ?? 'Etapa 1/3'} · Iniciando indexação...', null);
     unawaited(
       BackgroundTaskService.start(
         title: 'MusicWave Player',
@@ -291,12 +327,12 @@ class IndexingNotifier extends _$IndexingNotifier {
       final c = state.valueOrNull;
       if (c == null) return;
       final info = IndexingStatusInfo.from(c);
+      final prefix =
+          stagePrefix ?? 'Etapa ${info.stageIndex}/${info.stageTotal}';
+      final label = '$prefix · ${info.statusText}';
+      publishTask(label, info.progressValue);
       unawaited(
-        BackgroundTaskService.update(
-          title: 'MusicWave Player',
-          text:
-              'Etapa ${info.stageIndex}/${info.stageTotal} · ${info.statusText}',
-        ),
+        BackgroundTaskService.update(title: 'MusicWave Player', text: label),
       );
     }
 
@@ -388,13 +424,21 @@ class IndexingNotifier extends _$IndexingNotifier {
         );
         _regenerateQueue(visible);
         _saveLastScanDate(scanDate);
-        unawaited(BackgroundTaskService.stop());
+        finishTask();
       },
       onError: (e) {
         final c = state.valueOrNull;
-        if (c == null) return;
-        state = AsyncData(c.copyWith(indexingStatus: IndexingStatus.error));
-        unawaited(BackgroundTaskService.stop());
+        if (c != null) {
+          state = AsyncData(c.copyWith(indexingStatus: IndexingStatus.error));
+        }
+        finishTask();
+      },
+      cancelToken: token,
+      onCancelled: () {
+        // O que já foi salvo no banco permanece; recarrega a lista e
+        // devolve o status para um estado não ocupado.
+        unawaited(loadIndexedTracks());
+        finishTask();
       },
     );
   }
@@ -404,9 +448,77 @@ class IndexingNotifier extends _$IndexingNotifier {
   /// tocando só passa a usar o novo ganho na próxima vez que for carregada.
   /// Retorna null se não puder iniciar (biblioteca vazia ou operação em
   /// andamento).
+  bool get _isRenamingLibrary => BackgroundTaskManager.tasks.value.any(
+    (t) => t.id == BackgroundTaskIds.libraryRename,
+  );
+
+  /// Arquivos que seriam renomeados pela padronização (diálogo de
+  /// confirmação), incluindo faixas ocultas.
+  Future<List<PendingRename>> previewFileRenames() async {
+    final tracks = await MusicDatabase.instance.readAllTracksIncludingHidden();
+    return LibraryRenameService.pending(tracks);
+  }
+
+  /// Renomeia todos os arquivos da biblioteca para "Artista - Título" em
+  /// segundo plano. Retorna null se não pôde começar (outra tarefa em
+  /// andamento ou sem acesso à pasta).
+  Future<LibraryRenameResult?> standardizeFileNames() async {
+    final current = state.valueOrNull;
+    final root = current?.rootDirectory;
+    if (current == null ||
+        root == null ||
+        current.isBusy ||
+        BackgroundTaskManager.tasks.value.isNotEmpty) {
+      return null;
+    }
+    final folderUri = await SafService.getSavedUri();
+    if (folderUri == null) return null;
+
+    final tracks = await MusicDatabase.instance.readAllTracksIncludingHidden();
+    final token = TaskCancelToken();
+
+    void publish(int done, int total) {
+      final label = 'Padronizando nomes · ${formatProgressCount(done, total)}';
+      BackgroundTaskManager.update(
+        BackgroundTask(
+          id: BackgroundTaskIds.libraryRename,
+          label: label,
+          progress: total > 0 ? done / total : null,
+          cancelToken: token,
+        ),
+      );
+      unawaited(
+        BackgroundTaskService.update(title: 'MusicWave Player', text: label),
+      );
+    }
+
+    publish(0, tracks.length);
+    await BackgroundTaskService.start(
+      title: 'MusicWave Player',
+      text: 'Padronizando nomes dos arquivos...',
+    );
+
+    try {
+      return await LibraryRenameService.run(
+        tracks: tracks,
+        rootDirectory: root,
+        folderUri: folderUri,
+        cancelToken: token,
+        onProgress: publish,
+      );
+    } finally {
+      BackgroundTaskManager.finish(BackgroundTaskIds.libraryRename);
+      await loadIndexedTracks();
+      await BackgroundTaskService.stop();
+    }
+  }
+
   Future<LoudnessRescanResult?> rescanLoudness() async {
     final current = state.valueOrNull;
-    if (current == null || current.isBusy || current.indexedTracks.isEmpty) {
+    if (current == null ||
+        current.isBusy ||
+        _isRenamingLibrary ||
+        current.indexedTracks.isEmpty) {
       return null;
     }
 
@@ -421,6 +533,15 @@ class IndexingNotifier extends _$IndexingNotifier {
       ),
     );
 
+    final token = TaskCancelToken();
+    BackgroundTaskManager.update(
+      BackgroundTask(
+        id: BackgroundTaskIds.loudnessRescan,
+        label: 'Recalculando volume das músicas...',
+        progress: 0,
+        cancelToken: token,
+      ),
+    );
     unawaited(
       BackgroundTaskService.start(
         title: 'MusicWave Player',
@@ -431,16 +552,27 @@ class IndexingNotifier extends _$IndexingNotifier {
     try {
       return await IndexingService.rescanAllLoudness(
         tracks,
+        cancelToken: token,
         onProgress: (done, total) {
           final c = state.valueOrNull;
           if (c == null) return;
           state = AsyncData(
             c.copyWith(loudnessDone: done, loudnessTotal: total),
           );
+          final label =
+              'Recalculando volume · ${formatProgressCount(done, total)}';
+          BackgroundTaskManager.update(
+            BackgroundTask(
+              id: BackgroundTaskIds.loudnessRescan,
+              label: label,
+              progress: total > 0 ? done / total : null,
+              cancelToken: token,
+            ),
+          );
           unawaited(
             BackgroundTaskService.update(
               title: 'MusicWave Player',
-              text: 'Recalculando volume · $done/$total',
+              text: label,
             ),
           );
         },
@@ -465,6 +597,7 @@ class IndexingNotifier extends _$IndexingNotifier {
           ),
         );
       }
+      BackgroundTaskManager.finish(BackgroundTaskIds.loudnessRescan);
       unawaited(BackgroundTaskService.stop());
     }
   }
@@ -602,9 +735,16 @@ class IndexingNotifier extends _$IndexingNotifier {
     if (current == null) {
       return const TrackEditResult.failure('Biblioteca ainda carregando.');
     }
+    final rootDirectory = current.rootDirectory;
+    if (rootDirectory == null) {
+      return const TrackEditResult.failure(
+        'Pasta da biblioteca não configurada.',
+      );
+    }
 
     final result = await TrackRepository.editTrack(
       track: track,
+      rootDirectory: rootDirectory,
       newTitle: newTitle,
       newArtist: newArtist,
       newAlbum: newAlbum,
@@ -626,7 +766,7 @@ class IndexingNotifier extends _$IndexingNotifier {
 
       final playbackState = ref.read(playbackNotifierProvider).valueOrNull;
       if (playbackState?.lastPlayedMusicId == track.id) {
-        await ref.read(musicAudioHandlerProvider).loadTrack(track.path);
+        await ref.read(musicAudioHandlerProvider).loadTrack(updatedTrack.path);
       }
     }
 

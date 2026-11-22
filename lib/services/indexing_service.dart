@@ -7,6 +7,7 @@ import 'package:mpv_audio_kit/mpv_audio_kit.dart';
 import 'package:music_wave_player/data/music_database.dart';
 import 'package:music_wave_player/data/play_session_database.dart';
 import 'package:music_wave_player/models/music_track.dart';
+import 'package:music_wave_player/services/background_task_manager.dart';
 import 'package:music_wave_player/services/cover_art_service.dart';
 import 'package:music_wave_player/services/loudness_service.dart';
 import 'package:music_wave_player/services/metadata_parser.dart';
@@ -26,10 +27,14 @@ class LoudnessRescanResult {
   /// Faixas sem consenso entre os scans; o valor anterior foi mantido.
   final int failed;
 
+  /// Verdadeiro quando o usuário cancelou antes de varrer todas as faixas.
+  final bool cancelled;
+
   const LoudnessRescanResult({
     required this.corrected,
     required this.unchanged,
     required this.failed,
+    this.cancelled = false,
   });
 }
 
@@ -97,6 +102,9 @@ class IndexingService {
   /// [onComplete] é chamado ao final das três fases, com o snapshot final
   /// e definitivo das faixas salvas e a data de scan.
   /// [onError] é chamado em caso de falha.
+  /// [cancelToken] permite cancelar entre uma faixa e outra; ao detectar o
+  /// cancelamento, o que já foi salvo no banco é mantido e [onCancelled] é
+  /// chamado no lugar de [onComplete].
   static Future<void> startIndexing({
     required String rootDirectory,
     required void Function(int done, int total) onProgress,
@@ -108,9 +116,17 @@ class IndexingService {
     required void Function(List<MusicTrack> tracks, DateTime scanDate)
     onComplete,
     required void Function(Object error) onError,
+    required void Function() onCancelled,
+    TaskCancelToken? cancelToken,
   }) async {
+    bool isCancelled() => cancelToken?.isCancelled ?? false;
+
     try {
       final paths = await compute(scanDirectoryForPaths, rootDirectory);
+      if (isCancelled()) {
+        onCancelled();
+        return;
+      }
       onProgress(0, paths.length);
 
       await MusicDatabase.instance.pruneOrphanTracks(
@@ -131,6 +147,10 @@ class IndexingService {
       final basicTracks = <MusicTrack>[];
 
       for (int i = 0; i < paths.length; i += batchSize) {
+        if (isCancelled()) {
+          onCancelled();
+          return;
+        }
         final batch = paths.sublist(i, (i + batchSize).clamp(0, paths.length));
         final batchTracks = await compute(buildTracksFromPaths, batch);
         basicTracks.addAll(batchTracks);
@@ -142,13 +162,26 @@ class IndexingService {
         basicTracks,
         onProgress: onMetadataProgress,
         onLibraryBatch: onLibraryBatch,
+        cancelToken: cancelToken,
       );
+      if (isCancelled()) {
+        onCancelled();
+        return;
+      }
 
       final scanDate = DateTime.now();
       await _saveLastScanDate(scanDate);
       await _triggerMediaScan(rootDirectory);
 
-      await _scanMissingLoudness(savedTracks, onProgress: onLoudnessProgress);
+      await _scanMissingLoudness(
+        savedTracks,
+        onProgress: onLoudnessProgress,
+        cancelToken: cancelToken,
+      );
+      if (isCancelled()) {
+        onCancelled();
+        return;
+      }
 
       onComplete(savedTracks, scanDate);
     } catch (e) {
@@ -190,6 +223,7 @@ class IndexingService {
   static Future<void> _scanMissingLoudness(
     List<MusicTrack> tracks, {
     required void Function(int done, int total) onProgress,
+    TaskCancelToken? cancelToken,
   }) async {
     final pending = tracks.where((t) => t.loudnessLufs == null).toList();
     if (pending.isEmpty) return;
@@ -197,6 +231,7 @@ class IndexingService {
     onProgress(0, pending.length);
 
     for (int i = 0; i < pending.length; i++) {
+      if (cancelToken?.isCancelled ?? false) return;
       final track = pending[i];
       if (track.id != null) {
         try {
@@ -241,15 +276,21 @@ class IndexingService {
     List<MusicTrack> tracks, {
     required void Function(int done, int total) onProgress,
     required void Function(int trackId, double lufs) onCorrected,
+    TaskCancelToken? cancelToken,
   }) async {
     var corrected = 0;
     var unchanged = 0;
     var failed = 0;
+    var cancelled = false;
 
     onProgress(0, tracks.length);
     unawaited(_rescanLog('início: ${tracks.length} faixas'));
 
     for (int i = 0; i < tracks.length; i++) {
+      if (cancelToken?.isCancelled ?? false) {
+        cancelled = true;
+        break;
+      }
       final track = tracks[i];
       final id = track.id;
 
@@ -286,7 +327,8 @@ class IndexingService {
 
     unawaited(
       _rescanLog(
-        'fim: corrigidas=$corrected, iguais=$unchanged, sem consenso=$failed',
+        'fim${cancelled ? ' (cancelado)' : ''}: corrigidas=$corrected, '
+        'iguais=$unchanged, sem consenso=$failed',
       ),
     );
 
@@ -294,6 +336,7 @@ class IndexingService {
       corrected: corrected,
       unchanged: unchanged,
       failed: failed,
+      cancelled: cancelled,
     );
   }
 
@@ -309,6 +352,7 @@ class IndexingService {
     List<MusicTrack> tracks, {
     required void Function(int done, int total) onProgress,
     required void Function(List<MusicTrack> newTracks) onLibraryBatch,
+    TaskCancelToken? cancelToken,
   }) async {
     final durationPlayer = Player(
       configuration: const PlayerConfiguration(autoPlay: false),
@@ -325,6 +369,7 @@ class IndexingService {
     }
 
     for (int i = 0; i < tracks.length; i++) {
+      if (cancelToken?.isCancelled ?? false) break;
       var track = tracks[i];
 
       try {

@@ -4,19 +4,26 @@ import 'package:music_wave_player/data/music_database.dart';
 import 'package:music_wave_player/models/music_track.dart';
 import 'package:music_wave_player/services/ffmpeg_service.dart';
 import 'package:music_wave_player/services/saf_service.dart';
+import 'package:music_wave_player/services/track_file_namer.dart';
 
 /// Resultado de uma operação de edição de faixa.
 /// Elimina o acoplamento com [BuildContext] no repositório.
 sealed class TrackEditResult {
   const TrackEditResult();
-  const factory TrackEditResult.success(MusicTrack updatedTrack) =
-      TrackEditSuccess;
+  const factory TrackEditResult.success(
+    MusicTrack updatedTrack, {
+    bool renameFailed,
+  }) = TrackEditSuccess;
   const factory TrackEditResult.failure(String reason) = TrackEditFailure;
 }
 
 class TrackEditSuccess extends TrackEditResult {
   final MusicTrack updatedTrack;
-  const TrackEditSuccess(this.updatedTrack);
+
+  /// As tags foram gravadas, mas o arquivo não pôde ser renomeado.
+  final bool renameFailed;
+
+  const TrackEditSuccess(this.updatedTrack, {this.renameFailed = false});
 }
 
 class TrackEditFailure extends TrackEditResult {
@@ -87,12 +94,15 @@ class TrackRepository {
 
   // ── Edição de metadados ───────────────────────────────────────────────────
 
-  /// Edita os metadados de uma faixa via ffmpeg + SAF.
+  /// Edita os metadados de uma faixa via ffmpeg + SAF e renomeia o arquivo
+  /// para o padrão "Primeiro Artista - Título.ext".
   ///
   /// Retorna [TrackEditSuccess] com a faixa atualizada, ou [TrackEditFailure]
-  /// com a mensagem de erro — sem dependência de [BuildContext].
+  /// com a mensagem de erro — sem dependência de [BuildContext]. Se só o
+  /// renome falhar, a edição das tags vale ([TrackEditSuccess.renameFailed]).
   static Future<TrackEditResult> editTrack({
     required MusicTrack track,
+    required String rootDirectory,
     required String newTitle,
     required String newArtist,
     required String newAlbum,
@@ -100,6 +110,13 @@ class TrackRepository {
     final folderUri = await SafService.ensureAccess();
     if (folderUri == null) {
       return const TrackEditFailure('Acesso à pasta negado. Edição cancelada.');
+    }
+
+    final relativeDir = TrackFileNamer.relativeDir(track.path, rootDirectory);
+    if (relativeDir == null) {
+      return const TrackEditFailure(
+        'A faixa está fora da pasta raiz da biblioteca. Edição cancelada.',
+      );
     }
 
     final tempPath = await FfmpegService.writeMetadata(
@@ -115,10 +132,15 @@ class TrackRepository {
     }
 
     final fileName = track.path.split('/').last;
+    final dir = track.path.substring(
+      0,
+      track.path.length - fileName.length - 1,
+    );
     final copied = await SafService.copyTempToSaf(
       tempPath: tempPath,
       targetFileName: fileName,
       folderUri: folderUri,
+      relativeDir: relativeDir,
     );
 
     try {
@@ -131,20 +153,44 @@ class TrackRepository {
       );
     }
 
+    var finalPath = track.path;
+    var renameFailed = false;
+    final newName = TrackFileNamer.targetFileName(
+      dir: dir,
+      currentName: fileName,
+      artist: newArtist,
+      title: newTitle,
+    );
+    if (newName != null) {
+      final actualName = await SafService.renameFile(
+        folderUri: folderUri,
+        relativeDir: relativeDir,
+        oldFileName: fileName,
+        newFileName: newName,
+      );
+      if (actualName == null) {
+        renameFailed = true;
+      } else {
+        finalPath = '$dir/$actualName';
+      }
+    }
+
     await MusicDatabase.instance.updateTrack(
       id: track.id!,
       title: newTitle,
       artist: newArtist,
       album: newAlbum,
+      path: finalPath == track.path ? null : finalPath,
     );
 
     final updatedTrack = track.copyWith(
       title: newTitle,
       artist: newArtist,
       album: newAlbum,
+      path: finalPath,
       isEdited: true,
     );
 
-    return TrackEditSuccess(updatedTrack);
+    return TrackEditSuccess(updatedTrack, renameFailed: renameFailed);
   }
 }

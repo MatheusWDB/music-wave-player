@@ -4,11 +4,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:music_wave_player/components/download_format_selector.dart';
 import 'package:music_wave_player/components/library_folder_access.dart';
+import 'package:music_wave_player/providers/download_notifier.dart';
 import 'package:music_wave_player/providers/indexing_notifier.dart';
-import 'package:music_wave_player/services/background_task_service.dart';
 import 'package:music_wave_player/services/download_service.dart';
 
-enum _Phase { loading, error, ready, running, done }
+/// Etapas locais, antes do lote começar. O andamento do lote (rodando e
+/// resumo final) vive no [DownloadNotifier] e continua com a tela fechada.
+enum _Phase { loading, error, ready }
 
 /// Lista os vídeos de uma playlist, deixa o usuário marcar quais baixar e
 /// baixa um por vez para a pasta raiz da biblioteca, com tags automáticas.
@@ -25,9 +27,9 @@ class DownloadPlaylistScreen extends ConsumerStatefulWidget {
 class _DownloadPlaylistScreenState
     extends ConsumerState<DownloadPlaylistScreen> {
   static const _tagsWarning =
-      'As tags são geradas automaticamente a partir do título e do canal do '
-      'vídeo. Alguma música pode ficar com título ou artista errado; vale '
-      'revisar depois no editor de faixa do app.';
+      'As tags seguem o YouTube: o título do vídeo vira o nome da música e o '
+      'canal vira o artista, sem ajustes. Vale revisar depois no editor de '
+      'faixa do app.';
 
   _Phase _phase = _Phase.loading;
   DownloadPlaylist? _playlist;
@@ -37,17 +39,6 @@ class _DownloadPlaylistScreenState
   DownloadFormat _format = DownloadFormat.m4a;
   bool _mp3Available = false;
 
-  // Execução do lote
-  int _index = 0;
-  int _total = 0;
-  DownloadVideoInfo? _current;
-  int _bytes = 0;
-  int _saved = 0;
-  final List<DownloadVideoInfo> _skipped = [];
-  final List<(DownloadVideoInfo, String)> _failed = [];
-  bool _cancelRequested = false;
-  bool _leaveAfterCancel = false;
-
   @override
   void initState() {
     super.initState();
@@ -56,6 +47,11 @@ class _DownloadPlaylistScreenState
       if (mounted) setState(() => _mp3Available = ok);
     });
     _load();
+
+    // Resumo de um lote anterior não deve aparecer numa playlist nova.
+    Future.microtask(
+      () => ref.read(downloadNotifierProvider.notifier).dismissFinished(),
+    );
   }
 
   Future<void> _load() async {
@@ -97,6 +93,12 @@ class _DownloadPlaylistScreenState
     final playlist = _playlist;
     if (playlist == null || _selected.isEmpty) return;
 
+    final blocked = ref.read(downloadNotifierProvider).blockedReason;
+    if (blocked != null) {
+      _showSnack(blocked);
+      return;
+    }
+
     final root = ref.read(indexingNotifierProvider).valueOrNull?.rootDirectory;
     if (root == null) {
       _showSnack('Configure a pasta da biblioteca primeiro.');
@@ -107,124 +109,11 @@ class _DownloadPlaylistScreenState
     final queue = playlist.items
         .where((i) => _selected.contains(i.id))
         .toList();
-    setState(() {
-      _phase = _Phase.running;
-      _index = 0;
-      _total = queue.length;
-      _bytes = 0;
-      _saved = 0;
-      _skipped.clear();
-      _failed.clear();
-      _cancelRequested = false;
-    });
-
-    await BackgroundTaskService.start(
-      title: 'MusicWave Player',
-      text: 'Baixando playlist...',
+    unawaited(
+      ref
+          .read(downloadNotifierProvider.notifier)
+          .startPlaylist(queue: queue, format: _format),
     );
-
-    try {
-      for (var i = 0; i < queue.length; i++) {
-        if (_cancelRequested || !mounted) break;
-        final info = queue[i];
-        setState(() {
-          _index = i;
-          _current = info;
-          _bytes = 0;
-        });
-        unawaited(
-          BackgroundTaskService.update(
-            title: 'MusicWave Player',
-            text: '${i + 1}/${queue.length} · ${info.title}',
-          ),
-        );
-
-        // Confere duplicata antes de baixar, inclusive contra faixas que o
-        // próprio lote acabou de salvar.
-        final tags = DownloadService.suggestTags(info);
-        final library =
-            ref.read(indexingNotifierProvider).valueOrNull?.indexedTracks ??
-            const [];
-        if (DownloadService.isDuplicate(library, tags.title, tags.artist)) {
-          setState(() => _skipped.add(info));
-          continue;
-        }
-
-        DownloadedMedia? media;
-        try {
-          media = await DownloadService.download(
-            info,
-            onProgress: (_, bytes) {
-              if (mounted) setState(() => _bytes = bytes);
-            },
-          );
-          final path = await DownloadService.saveToLibrary(
-            media: media,
-            tags: tags,
-            rootDirectory: root,
-            format: _format,
-          );
-          final track = await ref
-              .read(indexingNotifierProvider.notifier)
-              .addTrackFromPath(path);
-          if (track == null) {
-            throw const DownloadException(
-              'Salva, mas não foi possível indexar. Reindexe a biblioteca.',
-            );
-          }
-          if (mounted) setState(() => _saved++);
-        } on DownloadCancelledException {
-          break;
-        } on DownloadException catch (e) {
-          if (mounted) setState(() => _failed.add((info, e.message)));
-        } finally {
-          if (media != null) await DownloadService.discard(media);
-        }
-      }
-    } finally {
-      await BackgroundTaskService.stop();
-    }
-
-    if (!mounted) return;
-    if (_leaveAfterCancel) {
-      Navigator.of(context).pop();
-      return;
-    }
-    setState(() {
-      _current = null;
-      _phase = _Phase.done;
-    });
-  }
-
-  void _cancel() {
-    if (_cancelRequested) return;
-    setState(() => _cancelRequested = true);
-    final current = _current;
-    if (current != null) unawaited(DownloadService.cancel(current.id));
-  }
-
-  Future<bool> _confirmCancel() async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Cancelar o download da playlist?'),
-        content: const Text(
-          'As músicas já salvas continuam na biblioteca. A que está sendo '
-          'baixada agora será descartada.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Continuar'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('Cancelar'),
-          ),
-        ],
-      ),
-    );
-    return confirmed ?? false;
   }
 
   String _formatMb(int bytes) => '${(bytes / 1048576).toStringAsFixed(1)} MB';
@@ -239,26 +128,22 @@ class _DownloadPlaylistScreenState
 
   @override
   Widget build(BuildContext context) {
-    return PopScope(
-      // Durante o lote, voltar pede confirmação, cancela e só sai quando o
-      // loop terminar.
-      canPop: _phase != _Phase.running,
-      onPopInvokedWithResult: (didPop, _) async {
-        if (didPop || _phase != _Phase.running || _cancelRequested) return;
-        final confirmed = await _confirmCancel();
-        if (confirmed && mounted && _phase == _Phase.running) {
-          _leaveAfterCancel = true;
-          _cancel();
-        }
-      },
-      child: Scaffold(
-        appBar: AppBar(title: const Text('Baixar playlist')),
-        body: SafeArea(child: _buildBody()),
-      ),
+    return Scaffold(
+      appBar: AppBar(title: const Text('Baixar playlist')),
+      body: SafeArea(child: _buildBody()),
     );
   }
 
   Widget _buildBody() {
+    switch (ref.watch(downloadNotifierProvider).phase) {
+      case DownloadPhase.playlistRunning:
+        return _buildRunning();
+      case DownloadPhase.playlistDone:
+        return _buildDone();
+      default:
+        break;
+    }
+
     switch (_phase) {
       case _Phase.loading:
         return const Center(child: CircularProgressIndicator());
@@ -266,10 +151,6 @@ class _DownloadPlaylistScreenState
         return _buildError();
       case _Phase.ready:
         return _buildReady();
-      case _Phase.running:
-        return _buildRunning();
-      case _Phase.done:
-        return _buildDone();
     }
   }
 
@@ -465,8 +346,9 @@ class _DownloadPlaylistScreenState
 
   Widget _buildCounters() {
     final colorScheme = Theme.of(context).colorScheme;
+    final dl = ref.watch(downloadNotifierProvider);
     return Text(
-      'Salvas: $_saved · Já existiam: ${_skipped.length} · Falhas: ${_failed.length}',
+      'Salvas: ${dl.saved} · Já existiam: ${dl.skipped.length} · Falhas: ${dl.failed.length}',
       textAlign: TextAlign.center,
       style: TextStyle(fontSize: 12, color: colorScheme.onSurfaceVariant),
     );
@@ -474,7 +356,8 @@ class _DownloadPlaylistScreenState
 
   Widget _buildRunning() {
     final colorScheme = Theme.of(context).colorScheme;
-    final current = _current;
+    final dl = ref.watch(downloadNotifierProvider);
+    final current = dl.current;
     return Padding(
       padding: const EdgeInsets.all(24),
       child: Column(
@@ -482,7 +365,7 @@ class _DownloadPlaylistScreenState
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Text(
-            'Música ${_index + 1} de $_total',
+            'Música ${dl.index + 1} de ${dl.total}',
             textAlign: TextAlign.center,
             style: TextStyle(
               fontSize: 16,
@@ -505,9 +388,9 @@ class _DownloadPlaylistScreenState
             ),
           const SizedBox(height: 4),
           Text(
-            _cancelRequested
+            dl.cancelRequested
                 ? 'Cancelando...'
-                : (_bytes > 0 ? _formatMb(_bytes) : 'Preparando...'),
+                : (dl.bytes > 0 ? _formatMb(dl.bytes) : 'Preparando...'),
             textAlign: TextAlign.center,
             style: TextStyle(fontSize: 12, color: colorScheme.onSurfaceVariant),
           ),
@@ -515,14 +398,16 @@ class _DownloadPlaylistScreenState
           _buildCounters(),
           const SizedBox(height: 24),
           OutlinedButton(
-            onPressed: _cancelRequested ? null : _cancel,
+            onPressed: dl.cancelRequested
+                ? null
+                : ref.read(downloadNotifierProvider.notifier).cancelCurrent,
             style: OutlinedButton.styleFrom(
               minimumSize: const Size.fromHeight(48),
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(12),
               ),
             ),
-            child: Text(_cancelRequested ? 'Cancelando...' : 'Cancelar'),
+            child: Text(dl.cancelRequested ? 'Cancelando...' : 'Cancelar'),
           ),
         ],
       ),
@@ -531,11 +416,12 @@ class _DownloadPlaylistScreenState
 
   Widget _buildDone() {
     final colorScheme = Theme.of(context).colorScheme;
+    final dl = ref.watch(downloadNotifierProvider);
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
         Text(
-          _cancelRequested ? 'Download cancelado' : 'Concluído',
+          dl.cancelRequested ? 'Download cancelado' : 'Concluído',
           style: TextStyle(
             fontSize: 20,
             fontWeight: FontWeight.bold,
@@ -546,23 +432,23 @@ class _DownloadPlaylistScreenState
         _buildCounters(),
         const SizedBox(height: 16),
         _buildWarning(),
-        if (_skipped.isNotEmpty) ...[
+        if (dl.skipped.isNotEmpty) ...[
           const SizedBox(height: 8),
           ExpansionTile(
             tilePadding: EdgeInsets.zero,
-            title: Text('Já existiam na biblioteca (${_skipped.length})'),
+            title: Text('Já existiam na biblioteca (${dl.skipped.length})'),
             children: [
-              for (final i in _skipped)
+              for (final i in dl.skipped)
                 ListTile(dense: true, title: Text(i.title)),
             ],
           ),
         ],
-        if (_failed.isNotEmpty)
+        if (dl.failed.isNotEmpty)
           ExpansionTile(
             tilePadding: EdgeInsets.zero,
-            title: Text('Falharam (${_failed.length})'),
+            title: Text('Falharam (${dl.failed.length})'),
             children: [
-              for (final (info, reason) in _failed)
+              for (final (info, reason) in dl.failed)
                 ListTile(
                   dense: true,
                   title: Text(info.title),
@@ -572,7 +458,10 @@ class _DownloadPlaylistScreenState
           ),
         const SizedBox(height: 16),
         FilledButton(
-          onPressed: () => Navigator.of(context).pop(),
+          onPressed: () {
+            ref.read(downloadNotifierProvider.notifier).dismissFinished();
+            Navigator.of(context).pop();
+          },
           style: FilledButton.styleFrom(
             minimumSize: const Size.fromHeight(48),
             shape: RoundedRectangleBorder(

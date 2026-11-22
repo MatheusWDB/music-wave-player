@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:music_wave_player/components/audio_transitions_bottom_sheet.dart';
+import 'package:music_wave_player/components/library_folder_access.dart';
+import 'package:music_wave_player/main.dart';
 import 'package:music_wave_player/providers/indexing_notifier.dart';
 import 'package:music_wave_player/services/indexing_service.dart';
+import 'package:music_wave_player/services/library_rename_service.dart';
 import 'package:music_wave_player/screens/backup_restore_screen.dart';
 import 'package:music_wave_player/screens/download_screen.dart';
 import 'package:music_wave_player/screens/equalizer_screen.dart';
@@ -63,8 +66,106 @@ class AppMenuSheet extends ConsumerWidget {
       return 'Não foi possível recalcular agora. Aguarde a operação em andamento.';
     }
     final failed = result.failed > 0 ? ', ${result.failed} sem consenso' : '';
+    if (result.cancelled) {
+      return 'Recálculo cancelado: ${result.corrected} corrigidas até aqui.';
+    }
     return 'Volume recalculado: ${result.corrected} corrigidas, '
         '${result.unchanged} já corretas$failed.';
+  }
+
+  Future<void> _confirmStandardizeNames(
+    BuildContext context,
+    WidgetRef ref,
+  ) async {
+    final notifier = ref.read(indexingNotifierProvider.notifier);
+    final root = ref.read(indexingNotifierProvider).valueOrNull?.rootDirectory;
+    if (root == null) {
+      AppMessenger.show(
+        'Configure a pasta da biblioteca primeiro.',
+        isError: true,
+      );
+      return;
+    }
+
+    final pending = await notifier.previewFileRenames();
+    if (!context.mounted) return;
+    if (pending.isEmpty) {
+      AppMessenger.show('Todos os arquivos já estão no padrão.');
+      return;
+    }
+
+    final count = pending.length;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Padronizar nomes'),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                '$count arquivo${count == 1 ? '' : 's'} '
+                '${count == 1 ? 'será renomeado' : 'serão renomeados'} para '
+                '"Artista - Música", usando o primeiro artista de cada faixa. '
+                'As tags não mudam. Roda em segundo plano e pode ser '
+                'cancelado. Depois, faça um novo backup: backups antigos não '
+                'reconhecem os nomes novos.',
+              ),
+              const SizedBox(height: 12),
+              Flexible(
+                child: ListView.separated(
+                  shrinkWrap: true,
+                  itemCount: count,
+                  separatorBuilder: (_, __) => const SizedBox(height: 8),
+                  itemBuilder: (_, i) => Text(
+                    '${pending[i].from}\n→ ${pending[i].to}',
+                    style: const TextStyle(fontSize: 12),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Renomear'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !context.mounted) return;
+
+    if (!await ensureLibraryFolderAccess(context, root) || !context.mounted) {
+      return;
+    }
+
+    Navigator.pop(context);
+    final result = await notifier.standardizeFileNames();
+    AppMessenger.show(_renameSummary(result), isError: result == null);
+  }
+
+  String _renameSummary(LibraryRenameResult? result) {
+    if (result == null) {
+      return 'Não foi possível padronizar agora. Aguarde as operações em '
+          'andamento.';
+    }
+    if (result.cancelled) {
+      return 'Padronização cancelada: ${result.renamed} '
+          'renomeado${result.renamed == 1 ? '' : 's'}.';
+    }
+    final failed = result.failed > 0
+        ? ', ${result.failed} falha${result.failed == 1 ? '' : 's'}'
+        : '';
+    return 'Nomes padronizados: ${result.renamed} '
+        'renomeado${result.renamed == 1 ? '' : 's'}, '
+        '${result.alreadyStandard} sem mudança$failed.';
   }
 
   @override
@@ -149,6 +250,20 @@ class AppMenuSheet extends ConsumerWidget {
                     : 'Reescanear o volume de todas as músicas',
               ),
               onTap: () => _confirmRescanLoudness(context, ref),
+            ),
+            ListTile(
+              enabled: !isBusy,
+              leading: Icon(
+                Icons.drive_file_rename_outline,
+                color: colorScheme.primary,
+              ),
+              title: const Text('Padronizar nomes dos arquivos'),
+              subtitle: Text(
+                isBusy
+                    ? 'Aguarde a operação em andamento'
+                    : 'Renomear para "Artista - Música"',
+              ),
+              onTap: () => _confirmStandardizeNames(context, ref),
             ),
             ListTile(
               leading: Icon(

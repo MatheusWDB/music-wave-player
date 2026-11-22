@@ -82,8 +82,13 @@ class _EditTrackBottomSheetState extends ConsumerState<EditTrackBottomSheet> {
     setState(() => _isSaving = false);
 
     switch (result) {
-      case TrackEditSuccess():
-        _showSnack('Informações salvas com sucesso!', isSuccess: true);
+      case TrackEditSuccess(:final renameFailed):
+        _showSnack(
+          renameFailed
+              ? 'Informações salvas, mas não foi possível renomear o arquivo.'
+              : 'Informações salvas com sucesso!',
+          isSuccess: !renameFailed,
+        );
         Navigator.of(context).pop(true);
       case TrackEditFailure(:final reason):
         _showSnack(reason);

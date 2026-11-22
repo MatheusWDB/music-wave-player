@@ -14,6 +14,7 @@ import 'package:music_wave_player/providers/equalizer_notifier.dart';
 import 'package:music_wave_player/providers/indexing_notifier.dart';
 import 'package:music_wave_player/providers/player_settings_notifier.dart';
 import 'package:music_wave_player/providers/sort_notifier.dart';
+import 'package:music_wave_player/services/background_task_manager.dart';
 import 'package:music_wave_player/services/background_task_service.dart';
 import 'package:music_wave_player/services/custom_image_service.dart';
 import 'package:music_wave_player/services/equalizer_service.dart';
@@ -152,6 +153,9 @@ class RestoreSummary {
   final int sessionsUnmatched;
   final int imagesRestored;
 
+  /// Verdadeiro quando o usuário cancelou: só parte do backup foi aplicada.
+  final bool cancelled;
+
   const RestoreSummary({
     required this.playlistsRestored,
     required this.tracksIndexed,
@@ -160,6 +164,7 @@ class RestoreSummary {
     required this.sessionsRestored,
     required this.sessionsUnmatched,
     this.imagesRestored = 0,
+    this.cancelled = false,
   });
 }
 
@@ -199,13 +204,24 @@ class BackupService {
   /// Formata e manda o texto de progresso pra notificação — chamado a
   /// cada item das etapas 2-4; o throttle de frequência já é feito
   /// dentro de [BackgroundTaskService.update].
-  static void _notifyRestoreProgress(RestoreProgress p) {
+  static void _notifyRestoreProgress(
+    RestoreProgress p,
+    TaskCancelToken cancelToken,
+  ) {
     final pct = p.total > 0
         ? ((p.done / p.total) * 100).toStringAsFixed(0)
         : '0';
     final text = p.total > 0
         ? 'Etapa ${p.stageIndex}/${p.stageTotal} · ${p.stage}... ${p.done}/${p.total} ($pct%)'
         : 'Etapa ${p.stageIndex}/${p.stageTotal} · ${p.stage}...';
+    BackgroundTaskManager.update(
+      BackgroundTask(
+        id: BackgroundTaskIds.backupRestore,
+        label: text,
+        progress: p.total > 0 ? p.done / p.total : null,
+        cancelToken: cancelToken,
+      ),
+    );
     unawaited(
       BackgroundTaskService.update(title: 'MusicWave Player', text: text),
     );
@@ -215,21 +231,43 @@ class BackupService {
 
   /// Gera o conteúdo do backup mantendo o processo em foreground, para a
   /// exportação não ser suspensa se a tela bloquear ou o app for minimizado.
-  static Future<String> buildBackup(WidgetRef ref) async {
+  /// [ref] é um [ProviderContainer] (e não o `WidgetRef` da tela) para a
+  /// operação continuar funcionando depois que a tela que a iniciou for
+  /// fechada.
+  static Future<String> buildBackup(ProviderContainer ref) async {
+    _reportExportProgress(0);
     unawaited(
       BackgroundTaskService.start(
         title: 'MusicWave Player',
-        text: 'Gerando backup...',
+        text: 'Gerando backup... (0%)',
       ),
     );
     try {
       return await _buildBackupInternal(ref);
     } finally {
+      BackgroundTaskManager.finish(BackgroundTaskIds.backupExport);
       unawaited(BackgroundTaskService.stop());
     }
   }
 
-  static Future<String> _buildBackupInternal(WidgetRef ref) async {
+  /// Progresso da exportação (0.0 a 1.0): leitura dos dados até 20%,
+  /// imagens personalizadas de 20% a 90% (a etapa mais pesada) e a
+  /// serialização do JSON no restante.
+  static void _reportExportProgress(double progress) {
+    final label = 'Gerando backup... (${(progress * 100).round()}%)';
+    BackgroundTaskManager.update(
+      BackgroundTask(
+        id: BackgroundTaskIds.backupExport,
+        label: label,
+        progress: progress,
+      ),
+    );
+    unawaited(
+      BackgroundTaskService.update(title: 'MusicWave Player', text: label),
+    );
+  }
+
+  static Future<String> _buildBackupInternal(ProviderContainer ref) async {
     final allTracks = await MusicDatabase.instance
         .readAllTracksIncludingHidden();
     final tracksById = {for (final t in allTracks) t.id: t};
@@ -243,6 +281,13 @@ class BackupService {
       playerSettingsNotifierProvider.future,
     );
     final eqState = await ref.read(equalizerNotifierProvider.future);
+    _reportExportProgress(0.2);
+
+    final customImages = await _exportCustomImages(
+      playlists,
+      onProgress: (done, total) =>
+          _reportExportProgress(0.2 + 0.7 * (total > 0 ? done / total : 1)),
+    );
 
     final json = {
       'format': _kBackupFormat,
@@ -308,9 +353,10 @@ class BackupService {
           })
           .whereType<Map<String, dynamic>>()
           .toList(),
-      'customImages': await _exportCustomImages(playlists),
+      'customImages': customImages,
     };
 
+    _reportExportProgress(0.9);
     return const JsonEncoder.withIndent('  ').convert(json);
   }
 
@@ -319,13 +365,16 @@ class BackupService {
   /// não sobrevive a um aparelho novo. Imagens cujo arquivo sumiu são
   /// ignoradas.
   static Future<List<Map<String, dynamic>>> _exportCustomImages(
-    List<Playlist> playlists,
-  ) async {
+    List<Playlist> playlists, {
+    required void Function(int done, int total) onProgress,
+  }) async {
     final rows = await MusicDatabase.instance.readAllCustomImages();
     final playlistNameById = {for (final p in playlists) '${p.id}': p.name};
     final result = <Map<String, dynamic>>[];
 
-    for (final row in rows) {
+    for (var i = 0; i < rows.length; i++) {
+      onProgress(i, rows.length);
+      final row = rows[i];
       final type = row[MusicDatabase.columnEntityType] as String;
       var key = row[MusicDatabase.columnEntityKey] as String;
       if (type == CustomImageType.playlist.name) {
@@ -428,9 +477,17 @@ class BackupService {
 
   static Future<RestoreSummary> restore({
     required BackupData data,
-    required WidgetRef ref,
+    required ProviderContainer ref,
   }) async {
     isRestoring.value = true;
+    final cancelToken = TaskCancelToken();
+    BackgroundTaskManager.update(
+      BackgroundTask(
+        id: BackgroundTaskIds.backupRestore,
+        label: 'Restaurando backup...',
+        cancelToken: cancelToken,
+      ),
+    );
     unawaited(
       BackgroundTaskService.start(
         title: 'MusicWave Player',
@@ -438,18 +495,49 @@ class BackupService {
       ),
     );
     try {
-      return await _restoreInternal(data: data, ref: ref);
+      return await _restoreInternal(
+        data: data,
+        ref: ref,
+        cancelToken: cancelToken,
+      );
     } finally {
       progress.value = null;
       isRestoring.value = false;
+      BackgroundTaskManager.finish(BackgroundTaskIds.backupRestore);
       unawaited(BackgroundTaskService.stop());
     }
   }
 
   static Future<RestoreSummary> _restoreInternal({
     required BackupData data,
-    required WidgetRef ref,
+    required ProviderContainer ref,
+    required TaskCancelToken cancelToken,
   }) async {
+    var tracksIndexed = 0;
+    var metaMatched = 0, metaUnmatched = 0;
+    var playlistsRestored = 0;
+    var sessionsRestored = 0, sessionsUnmatched = 0;
+    var imagesRestored = 0;
+
+    RestoreSummary buildSummary({bool cancelled = false}) => RestoreSummary(
+      playlistsRestored: playlistsRestored,
+      tracksIndexed: tracksIndexed,
+      trackMetaMatched: metaMatched,
+      trackMetaUnmatched: metaUnmatched,
+      sessionsRestored: sessionsRestored,
+      sessionsUnmatched: sessionsUnmatched,
+      imagesRestored: imagesRestored,
+      cancelled: cancelled,
+    );
+
+    // Cancelar não desfaz o que já foi aplicado: o restore é um merge
+    // idempotente, então restaurar o mesmo backup de novo completa o resto.
+    Future<RestoreSummary> cancelledSummary() async {
+      await ref.read(customImagesProvider.notifier).reload();
+      await ref.read(indexingNotifierProvider.notifier).loadIndexedTracks();
+      return buildSummary(cancelled: true);
+    }
+
     // Restaura settings primeiro (inclui o diretório raiz), e reindexa a
     // biblioteca inteira a partir dele antes de aplicar o resto do backup.
     // Isso substitui a recriação pontual de faixas referenciadas: agora
@@ -462,16 +550,23 @@ class BackupService {
         ?.rootDirectory;
     final tracksBeforeReindex = await MusicDatabase.instance
         .readAllTracksIncludingHidden();
-    var tracksIndexed = 0;
 
     if (rootDirectory != null) {
       final permission = await Permission.audio.request();
       if (permission.isGranted) {
-        await ref.read(indexingNotifierProvider.notifier).startIndexing();
+        await ref
+            .read(indexingNotifierProvider.notifier)
+            .startIndexing(
+              taskId: BackgroundTaskIds.backupRestore,
+              stagePrefix: 'Etapa 1/$_restoreTotalStages',
+              cancelToken: cancelToken,
+            );
       }
       // Sem a permissão concedida não dá pra reindexar agora — segue o
       // restore só com o que já está na biblioteca, sem travar por isso.
     }
+
+    if (cancelToken.isCancelled) return cancelledSummary();
 
     final allTracks = await MusicDatabase.instance
         .readAllTracksIncludingHidden();
@@ -479,10 +574,10 @@ class BackupService {
     if (tracksIndexed < 0) tracksIndexed = 0;
 
     // Rating e ocultas
-    int metaMatched = 0, metaUnmatched = 0;
     final toHide = <int>[];
     final toUnhide = <int>[];
     for (var i = 0; i < data.trackMeta.length; i++) {
+      if (cancelToken.isCancelled) return cancelledSummary();
       final meta = data.trackMeta[i];
       progress.value = RestoreProgress(
         stage: 'Restaurando avaliações e faixas ocultas',
@@ -491,7 +586,7 @@ class BackupService {
         stageIndex: 2,
         stageTotal: _restoreTotalStages,
       );
-      _notifyRestoreProgress(progress.value!);
+      _notifyRestoreProgress(progress.value!, cancelToken);
       final match = _findMatch(
         path: meta.path,
         title: meta.title,
@@ -523,8 +618,8 @@ class BackupService {
     // resolvidas; addTracks já ignora duplicatas.
     final existingPlaylists = await PlaylistDatabase.instance
         .readAllPlaylists();
-    int playlistsRestored = 0;
     for (var i = 0; i < data.playlists.length; i++) {
+      if (cancelToken.isCancelled) return cancelledSummary();
       final backupPlaylist = data.playlists[i];
       progress.value = RestoreProgress(
         stage: 'Restaurando playlists',
@@ -533,7 +628,7 @@ class BackupService {
         stageIndex: 3,
         stageTotal: _restoreTotalStages,
       );
-      _notifyRestoreProgress(progress.value!);
+      _notifyRestoreProgress(progress.value!, cancelToken);
       final existing = existingPlaylists
           .where((p) => p.name == backupPlaylist.name)
           .firstOrNull;
@@ -561,8 +656,8 @@ class BackupService {
 
     // Sessões de reprodução — upsert mantendo o maior tempo ouvido em caso
     // de mesmo (faixa, data), para não inflar estatísticas em restaurações repetidas.
-    int sessionsRestored = 0, sessionsUnmatched = 0;
     for (var i = 0; i < data.playSessions.length; i++) {
+      if (cancelToken.isCancelled) return cancelledSummary();
       final session = data.playSessions[i];
       progress.value = RestoreProgress(
         stage: 'Restaurando sessões de reprodução',
@@ -571,7 +666,7 @@ class BackupService {
         stageIndex: 4,
         stageTotal: _restoreTotalStages,
       );
-      _notifyRestoreProgress(progress.value!);
+      _notifyRestoreProgress(progress.value!, cancelToken);
       final match = _findMatch(
         path: session.trackPath,
         title: session.trackTitle,
@@ -595,8 +690,8 @@ class BackupService {
     final restoredPlaylists = await PlaylistDatabase.instance
         .readAllPlaylists();
     final playlistIdByName = {for (final p in restoredPlaylists) p.name: p.id!};
-    int imagesRestored = 0;
     for (var i = 0; i < data.customImages.length; i++) {
+      if (cancelToken.isCancelled) return cancelledSummary();
       final image = data.customImages[i];
       progress.value = RestoreProgress(
         stage: 'Restaurando imagens personalizadas',
@@ -605,7 +700,7 @@ class BackupService {
         stageIndex: 5,
         stageTotal: _restoreTotalStages,
       );
-      _notifyRestoreProgress(progress.value!);
+      _notifyRestoreProgress(progress.value!, cancelToken);
 
       final type = CustomImageType.values
           .where((t) => t.name == image.type)
@@ -631,20 +726,12 @@ class BackupService {
     // Recarrega para refletir ratings/hidden/faixas reindexadas na UI.
     await ref.read(indexingNotifierProvider.notifier).loadIndexedTracks();
 
-    return RestoreSummary(
-      playlistsRestored: playlistsRestored,
-      tracksIndexed: tracksIndexed,
-      trackMetaMatched: metaMatched,
-      trackMetaUnmatched: metaUnmatched,
-      sessionsRestored: sessionsRestored,
-      sessionsUnmatched: sessionsUnmatched,
-      imagesRestored: imagesRestored,
-    );
+    return buildSummary();
   }
 
   static Future<void> _restoreSettings(
     Map<String, dynamic> settings,
-    WidgetRef ref,
+    ProviderContainer ref,
   ) async {
     if (settings['rootDirectory'] != null) {
       await ref

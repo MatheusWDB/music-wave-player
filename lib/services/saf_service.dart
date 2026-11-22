@@ -102,17 +102,41 @@ class SafService {
     required String tempPath,
     required String targetFileName,
     required String folderUri,
+    String relativeDir = '',
   }) async {
     try {
       final result = await _channel.invokeMethod<bool>('copyTempToSaf', {
         'tempPath': tempPath,
         'targetFileName': targetFileName,
         'folderUri': folderUri,
+        'relativeDir': relativeDir,
       });
       return result ?? false;
     } on PlatformException catch (e) {
       debugPrint('SafService.copyTempToSaf erro: $e');
       return false;
+    }
+  }
+
+  /// Renomeia [oldFileName] dentro de [relativeDir] (subpasta da raiz
+  /// concedida; vazio = a própria raiz). Retorna o nome final — o provedor
+  /// pode ajustá-lo — ou null se não foi possível renomear.
+  static Future<String?> renameFile({
+    required String folderUri,
+    required String oldFileName,
+    required String newFileName,
+    String relativeDir = '',
+  }) async {
+    try {
+      return await _channel.invokeMethod<String>('renameFile', {
+        'folderUri': folderUri,
+        'relativeDir': relativeDir,
+        'oldFileName': oldFileName,
+        'newFileName': newFileName,
+      });
+    } on PlatformException catch (e) {
+      debugPrint('SafService.renameFile erro: $e');
+      return null;
     }
   }
 

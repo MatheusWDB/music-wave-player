@@ -287,7 +287,15 @@ class MusicDatabase {
           final map = track.toMap();
           map[columnAddedAt] ??= now;
           final id = await txn.insert(tableTracks, map);
-          savedTracks.add(track.copyWith(id: id));
+          // A faixa em memória precisa da mesma data gravada no banco; sem
+          // ela, faixas recém-adicionadas ficam com addedAt nulo e caem como
+          // as mais antigas em "Adicionadas recentemente" até recarregar.
+          savedTracks.add(
+            track.copyWith(
+              id: id,
+              addedAt: DateTime.parse(map[columnAddedAt] as String),
+            ),
+          );
         }
       }
     });
@@ -430,6 +438,7 @@ class MusicDatabase {
     required String artist,
     required String album,
     String? coverPath,
+    String? path,
   }) async {
     final db = await instance.database;
     final values = <String, dynamic>{
@@ -439,10 +448,23 @@ class MusicDatabase {
       columnIsEdited: 1,
     };
     if (coverPath != null) values[columnCoverPath] = coverPath;
+    if (path != null) values[columnPath] = path;
 
     await db.update(
       tableTracks,
       values,
+      where: '$columnId = ?',
+      whereArgs: [id],
+    );
+  }
+
+  /// Atualiza só o caminho do arquivo (renomeação em lote), sem marcar a
+  /// faixa como editada pelo usuário.
+  Future<void> updatePath(int id, String path) async {
+    final db = await instance.database;
+    await db.update(
+      tableTracks,
+      {columnPath: path},
       where: '$columnId = ?',
       whereArgs: [id],
     );

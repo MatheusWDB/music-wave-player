@@ -48,6 +48,7 @@ public class MainActivity extends FlutterActivity {
                         String tempPath = call.argument("tempPath");
                         String targetFileName = call.argument("targetFileName");
                         String folderUriString = call.argument("folderUri");
+                        String relativeDir = call.argument("relativeDir");
 
                         if (tempPath == null || targetFileName == null || folderUriString == null) {
                             result.error("INVALID_ARGS", "Argumentos inválidos", null);
@@ -56,7 +57,9 @@ public class MainActivity extends FlutterActivity {
 
                         try {
                             Uri folderUri = Uri.parse(folderUriString);
-                            DocumentFile folderDoc = DocumentFile.fromTreeUri(getApplicationContext(), folderUri);
+                            DocumentFile folderDoc = resolveFolder(
+                                    DocumentFile.fromTreeUri(getApplicationContext(), folderUri),
+                                    relativeDir);
 
                             if (folderDoc == null) {
                                 result.error("FOLDER_NOT_FOUND", "Pasta não encontrada", null);
@@ -99,6 +102,59 @@ public class MainActivity extends FlutterActivity {
                             result.error("COPY_FAILED", e.getMessage(), null);
                         }
 
+                    } else if (call.method.equals("renameFile")) {
+                        String folderUriString = call.argument("folderUri");
+                        String relativeDir = call.argument("relativeDir");
+                        String oldFileName = call.argument("oldFileName");
+                        String newFileName = call.argument("newFileName");
+
+                        if (folderUriString == null || oldFileName == null || newFileName == null) {
+                            result.error("INVALID_ARGS", "Argumentos inválidos", null);
+                            return;
+                        }
+
+                        try {
+                            Uri treeUri = Uri.parse(folderUriString);
+
+                            // Caminho direto: monta o URI do documento a partir do id da árvore
+                            // (evita listar a pasta inteira a cada arquivo renomeado).
+                            Uri renamedUri = null;
+                            try {
+                                String docId = DocumentsContract.getTreeDocumentId(treeUri)
+                                        + (relativeDir == null || relativeDir.isEmpty() ? "" : "/" + relativeDir)
+                                        + "/" + oldFileName;
+                                Uri docUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, docId);
+                                renamedUri = DocumentsContract.renameDocument(
+                                        getContentResolver(), docUri, newFileName);
+                            } catch (Exception ignored) {
+                                // Cai para a busca por nome abaixo.
+                            }
+
+                            if (renamedUri != null) {
+                                DocumentFile renamed = DocumentFile.fromSingleUri(getApplicationContext(), renamedUri);
+                                String finalName = renamed != null ? renamed.getName() : null;
+                                result.success(finalName != null ? finalName : newFileName);
+                                return;
+                            }
+
+                            DocumentFile folderDoc = resolveFolder(
+                                    DocumentFile.fromTreeUri(getApplicationContext(), treeUri),
+                                    relativeDir);
+                            DocumentFile fileDoc = folderDoc == null ? null : folderDoc.findFile(oldFileName);
+                            if (fileDoc == null) {
+                                result.error("FILE_NOT_FOUND", "Arquivo não encontrado: " + oldFileName, null);
+                                return;
+                            }
+                            if (!fileDoc.renameTo(newFileName)) {
+                                result.error("RENAME_FAILED", "Não foi possível renomear: " + oldFileName, null);
+                                return;
+                            }
+                            result.success(fileDoc.getName());
+
+                        } catch (Exception e) {
+                            result.error("RENAME_FAILED", e.getMessage(), null);
+                        }
+
                     } else if (call.method.equals("scanMedia")) {
                         String path = call.argument("path");
                         if (path == null) {
@@ -116,6 +172,28 @@ public class MainActivity extends FlutterActivity {
                         result.notImplemented();
                     }
                 });
+    }
+
+    /**
+     * Desce da pasta raiz concedida até a subpasta indicada (ex.: "Rock/Album").
+     * Vazio ou nulo devolve a própria raiz; retorna null se algum trecho do
+     * caminho não existir.
+     */
+    private DocumentFile resolveFolder(DocumentFile root, String relativeDir) {
+        if (root == null || relativeDir == null || relativeDir.isEmpty()) {
+            return root;
+        }
+        DocumentFile current = root;
+        for (String segment : relativeDir.split("/")) {
+            if (segment.isEmpty()) {
+                continue;
+            }
+            current = current.findFile(segment);
+            if (current == null || !current.isDirectory()) {
+                return null;
+            }
+        }
+        return current;
     }
 
     @Override

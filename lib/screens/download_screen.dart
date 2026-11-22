@@ -6,12 +6,15 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:music_wave_player/components/download_format_selector.dart';
 import 'package:music_wave_player/components/download_review_sheet.dart';
 import 'package:music_wave_player/components/library_folder_access.dart';
+import 'package:music_wave_player/providers/download_notifier.dart';
 import 'package:music_wave_player/providers/indexing_notifier.dart';
-import 'package:music_wave_player/services/background_task_service.dart';
 import 'package:music_wave_player/screens/download_playlist_screen.dart';
 import 'package:music_wave_player/services/download_service.dart';
 
-enum _Step { idle, fetching, ready, downloading, downloaded, saving }
+/// Etapas locais, antes de o download começar. Do clique em "Baixar" em
+/// diante o andamento vive no [DownloadNotifier], que continua rodando com
+/// a tela fechada.
+enum _Step { idle, fetching, ready }
 
 /// Baixa o áudio de um link do YouTube, deixa o usuário conferir as tags e
 /// salva o arquivo na pasta raiz da biblioteca.
@@ -27,18 +30,10 @@ class _DownloadScreenState extends ConsumerState<DownloadScreen> {
 
   _Step _step = _Step.idle;
   DownloadVideoInfo? _info;
-  DownloadedMedia? _media;
-  double? _progress;
-  int _bytes = 0;
   String? _error;
   DownloadFormat _format = DownloadFormat.m4a;
-  bool _leaveAfterCancel = false;
   bool _mp3Available = false;
-
-  bool get _busy =>
-      _step == _Step.fetching ||
-      _step == _Step.downloading ||
-      _step == _Step.saving;
+  bool _reviewOpen = false;
 
   @override
   void initState() {
@@ -47,26 +42,20 @@ class _DownloadScreenState extends ConsumerState<DownloadScreen> {
     DownloadService.mp3Available().then((ok) {
       if (mounted) setState(() => _mp3Available = ok);
     });
+
+    // Chegou aqui por uma música que já terminou de baixar em segundo plano
+    // (aviso da tela inicial): abre a revisão direto.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final phase = ref.read(downloadNotifierProvider).phase;
+      if (phase == DownloadPhase.awaitingReview) unawaited(_review());
+    });
   }
 
   @override
   void dispose() {
     _linkCtrl.dispose();
-    final media = _media;
-    if (media != null) unawaited(DownloadService.discard(media));
     super.dispose();
-  }
-
-  void _showSnack(String message, {bool isSuccess = false}) {
-    if (!mounted) return;
-    final colorScheme = Theme.of(context).colorScheme;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor: isSuccess ? colorScheme.primary : colorScheme.error,
-        behavior: SnackBarBehavior.floating,
-      ),
-    );
   }
 
   Future<void> _paste() async {
@@ -78,7 +67,11 @@ class _DownloadScreenState extends ConsumerState<DownloadScreen> {
 
   Future<void> _fetch() async {
     final link = _linkCtrl.text.trim();
-    if (link.isEmpty || _busy) return;
+    if (link.isEmpty ||
+        _step == _Step.fetching ||
+        !ref.read(downloadNotifierProvider).canStart) {
+      return;
+    }
     FocusScope.of(context).unfocus();
 
     // Link de playlist abre a tela de seleção de vídeos.
@@ -111,160 +104,73 @@ class _DownloadScreenState extends ConsumerState<DownloadScreen> {
     }
   }
 
-  Future<void> _download() async {
+  void _download() {
     final info = _info;
-    if (info == null || _busy) return;
-
-    final root = ref.read(indexingNotifierProvider).valueOrNull?.rootDirectory;
-    if (root == null) {
-      setState(() => _error = 'Configure a pasta da biblioteca primeiro.');
-      return;
-    }
-
-    setState(() {
-      _step = _Step.downloading;
-      _progress = null;
-      _bytes = 0;
-      _error = null;
-    });
-
-    await BackgroundTaskService.start(
-      title: 'MusicWave Player',
-      text: 'Baixando música...',
+    if (info == null) return;
+    setState(() => _error = null);
+    unawaited(
+      ref
+          .read(downloadNotifierProvider.notifier)
+          .startSingle(info: info, format: _format),
     );
-
-    DownloadedMedia? media;
-    try {
-      media = await DownloadService.download(
-        info,
-        onProgress: (fraction, bytes) {
-          if (!mounted) return;
-          setState(() {
-            _progress = fraction;
-            _bytes = bytes;
-          });
-          unawaited(
-            BackgroundTaskService.update(
-              title: 'MusicWave Player',
-              text: 'Baixando música... ${_formatMb(bytes)}',
-            ),
-          );
-        },
-      );
-    } on DownloadCancelledException {
-      if (mounted) {
-        if (_leaveAfterCancel) {
-          Navigator.of(context).pop();
-        } else {
-          setState(() => _step = _Step.ready);
-        }
-      }
-    } on DownloadException catch (e) {
-      if (mounted) {
-        setState(() {
-          _error = e.message;
-          _step = _Step.ready;
-        });
-      }
-    } finally {
-      await BackgroundTaskService.stop();
-    }
-
-    if (media == null) return;
-    if (!mounted) {
-      await DownloadService.discard(media);
-      return;
-    }
-
-    _media = media;
-    setState(() => _step = _Step.downloaded);
-    await _review();
   }
 
   /// Abre a revisão de tags e, se confirmada, salva na biblioteca.
   Future<void> _review() async {
-    final info = _info;
-    final media = _media;
+    if (_reviewOpen) return;
+    final dl = ref.read(downloadNotifierProvider);
+    final info = dl.info;
+    final media = dl.media;
     final root = ref.read(indexingNotifierProvider).valueOrNull?.rootDirectory;
-    if (info == null || media == null || root == null) return;
+    if (dl.phase != DownloadPhase.awaitingReview ||
+        info == null ||
+        media == null ||
+        root == null) {
+      return;
+    }
 
-    final tags = await DownloadReviewSheet.show(
-      context,
-      initial: DownloadService.suggestTags(info),
-      coverPath: media.thumbnailPath,
-      isDuplicate: (title, artist) => DownloadService.isDuplicate(
-        ref.read(indexingNotifierProvider).valueOrNull?.indexedTracks ?? [],
-        title,
-        artist,
-      ),
-    );
-    if (tags == null || !mounted) return;
-
-    // Na primeira vez explica o seletor de pasta e só aceita a raiz da biblioteca.
-    if (!await ensureLibraryFolderAccess(context, root) || !mounted) return;
-
-    setState(() {
-      _step = _Step.saving;
-      _error = null;
-    });
-
-    await BackgroundTaskService.start(
-      title: 'MusicWave Player',
-      text: 'Salvando na biblioteca...',
-    );
-
+    _reviewOpen = true;
     try {
-      final path = await DownloadService.saveToLibrary(
-        media: media,
-        tags: tags,
-        rootDirectory: root,
-        format: _format,
+      final tags = await DownloadReviewSheet.show(
+        context,
+        initial: DownloadService.suggestTags(info),
+        coverPath: media.thumbnailPath,
+        isDuplicate: (title, artist) => DownloadService.isDuplicate(
+          ref.read(indexingNotifierProvider).valueOrNull?.indexedTracks ?? [],
+          title,
+          artist,
+        ),
       );
-      final track = await ref
-          .read(indexingNotifierProvider.notifier)
-          .addTrackFromPath(path);
-      if (track == null) {
-        throw const DownloadException(
-          'O arquivo foi salvo, mas não foi possível indexá-lo. '
-          'Reindexe a biblioteca.',
-        );
-      }
+      if (tags == null || !mounted) return;
 
-      await DownloadService.discard(media);
-      _media = null;
-      _showSnack('Música adicionada à biblioteca!', isSuccess: true);
-      if (!mounted) return;
-      _linkCtrl.clear();
-      setState(() {
-        _info = null;
-        _step = _Step.idle;
-      });
-    } on DownloadException catch (e) {
-      if (!mounted) return;
-      // Mantém o download no cache para o usuário tentar salvar de novo.
-      setState(() {
-        _error = e.message;
-        _step = _Step.downloaded;
-      });
+      // Na primeira vez explica o seletor de pasta e só aceita a raiz da biblioteca.
+      if (!await ensureLibraryFolderAccess(context, root) || !mounted) return;
+
+      final saved = await ref
+          .read(downloadNotifierProvider.notifier)
+          .saveSingle(tags);
+      if (saved && mounted) {
+        _linkCtrl.clear();
+        setState(() {
+          _info = null;
+          _step = _Step.idle;
+        });
+      }
     } finally {
-      await BackgroundTaskService.stop();
+      _reviewOpen = false;
     }
   }
 
   String _formatMb(int bytes) => '${(bytes / 1048576).toStringAsFixed(1)} MB';
 
-  void _cancelDownload() {
-    final info = _info;
-    if (info != null) unawaited(DownloadService.cancel(info.id));
-  }
-
   Future<void> _discard() async {
-    final media = _media;
-    _media = null;
-    if (media != null) await DownloadService.discard(media);
+    final notifier = ref.read(downloadNotifierProvider.notifier);
+    final info = ref.read(downloadNotifierProvider).info ?? _info;
+    await notifier.discardPending();
     if (!mounted) return;
     setState(() {
-      _step = _Step.ready;
+      _info = info;
+      _step = info != null ? _Step.ready : _Step.idle;
       _error = null;
     });
   }
@@ -272,109 +178,130 @@ class _DownloadScreenState extends ConsumerState<DownloadScreen> {
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
-    final info = _info;
+    final dl = ref.watch(downloadNotifierProvider);
+    final info = dl.info ?? _info;
+    final error = dl.error ?? _error;
+    final locked = _step == _Step.fetching || !dl.canStart;
 
-    return PopScope(
-      // Só o salvamento (ffmpeg + cópia SAF) não pode ser interrompido.
-      canPop: _step != _Step.downloading && _step != _Step.saving,
-      onPopInvokedWithResult: (didPop, _) {
-        if (didPop || _step != _Step.downloading) return;
-        // Sai da tela quando o cancelamento terminar (ver _download).
-        _leaveAfterCancel = true;
-        _cancelDownload();
-      },
-      child: Scaffold(
-        appBar: AppBar(title: const Text('Baixar músicas')),
-        body: SafeArea(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                TextField(
-                  controller: _linkCtrl,
-                  enabled: !_busy && _step != _Step.downloaded,
-                  keyboardType: TextInputType.url,
-                  textInputAction: TextInputAction.search,
-                  onSubmitted: (_) => _fetch(),
-                  decoration: InputDecoration(
-                    labelText: 'Link do YouTube',
-                    prefixIcon: Icon(Icons.link, color: colorScheme.primary),
-                    suffixIcon: IconButton(
-                      icon: const Icon(Icons.content_paste),
-                      tooltip: 'Colar',
-                      onPressed: _busy ? null : _paste,
-                    ),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    filled: true,
-                    fillColor: colorScheme.surfaceContainerHighest.withValues(
-                      alpha: 0.4,
-                    ),
+    // Terminou de baixar com a tela aberta: já abre a revisão de tags.
+    ref.listen(downloadNotifierProvider.select((s) => s.phase), (prev, next) {
+      if (prev == DownloadPhase.downloading &&
+          next == DownloadPhase.awaitingReview) {
+        unawaited(_review());
+      }
+    });
+
+    return Scaffold(
+      appBar: AppBar(title: const Text('Baixar músicas')),
+      body: SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              TextField(
+                controller: _linkCtrl,
+                enabled: !locked,
+                keyboardType: TextInputType.url,
+                textInputAction: TextInputAction.search,
+                onSubmitted: (_) => _fetch(),
+                decoration: InputDecoration(
+                  labelText: 'Link do YouTube',
+                  prefixIcon: Icon(Icons.link, color: colorScheme.primary),
+                  suffixIcon: IconButton(
+                    icon: const Icon(Icons.content_paste),
+                    tooltip: 'Colar',
+                    onPressed: locked ? null : _paste,
+                  ),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  filled: true,
+                  fillColor: colorScheme.surfaceContainerHighest.withValues(
+                    alpha: 0.4,
                   ),
                 ),
-                const SizedBox(height: 12),
-                FilledButton(
-                  onPressed: (_busy || _step == _Step.downloaded)
-                      ? null
-                      : _fetch,
-                  style: FilledButton.styleFrom(
-                    minimumSize: const Size.fromHeight(48),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
+              ),
+              const SizedBox(height: 12),
+              FilledButton(
+                onPressed: locked ? null : _fetch,
+                style: FilledButton.styleFrom(
+                  minimumSize: const Size.fromHeight(48),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
                   ),
-                  child: _step == _Step.fetching
-                      ? SizedBox(
-                          width: 20,
-                          height: 20,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2.5,
-                            color: colorScheme.onPrimary,
-                          ),
-                        )
-                      : const Text('Buscar'),
                 ),
-                if (_error != null) ...[
-                  const SizedBox(height: 16),
-                  Text(
-                    _error!,
-                    style: TextStyle(color: colorScheme.error, fontSize: 13),
-                  ),
-                ],
-                if (info != null) ...[
-                  const SizedBox(height: 20),
-                  _VideoPreview(info: info),
-                  const SizedBox(height: 16),
-                  if (_step == _Step.ready || _step == _Step.downloaded) ...[
-                    DownloadFormatSelector(
-                      value: _format,
-                      mp3Available: _mp3Available,
-                      onChanged: (format) => setState(() => _format = format),
-                    ),
-                    const SizedBox(height: 16),
-                  ],
-                  _buildActions(colorScheme),
-                ],
+                child: _step == _Step.fetching
+                    ? SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2.5,
+                          color: colorScheme.onPrimary,
+                        ),
+                      )
+                    : const Text('Buscar'),
+              ),
+              if (error != null) ...[
+                const SizedBox(height: 16),
+                Text(
+                  error,
+                  style: TextStyle(color: colorScheme.error, fontSize: 13),
+                ),
               ],
-            ),
+              if (info == null && !dl.canStart) ...[
+                const SizedBox(height: 16),
+                Text(
+                  dl.blockedReason!,
+                  style: TextStyle(
+                    color: colorScheme.onSurfaceVariant,
+                    fontSize: 13,
+                  ),
+                ),
+              ],
+              if (info != null) ...[
+                const SizedBox(height: 20),
+                _VideoPreview(info: info),
+                const SizedBox(height: 16),
+                if ((_step == _Step.ready && dl.canStart) ||
+                    dl.phase == DownloadPhase.awaitingReview) ...[
+                  DownloadFormatSelector(
+                    value: dl.phase == DownloadPhase.awaitingReview
+                        ? dl.format
+                        : _format,
+                    mp3Available: _mp3Available,
+                    onChanged: (format) {
+                      setState(() => _format = format);
+                      ref
+                          .read(downloadNotifierProvider.notifier)
+                          .setFormat(format);
+                    },
+                  ),
+                  const SizedBox(height: 16),
+                ],
+                _buildActions(colorScheme, dl),
+              ],
+            ],
           ),
         ),
       ),
     );
   }
 
-  Widget _buildActions(ColorScheme colorScheme) {
-    switch (_step) {
-      case _Step.downloading:
+  Widget _buildActions(ColorScheme colorScheme, DownloadState dl) {
+    switch (dl.phase) {
+      case DownloadPhase.downloading:
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            LinearProgressIndicator(value: _progress),
+            LinearProgressIndicator(value: dl.progress),
             const SizedBox(height: 8),
             Text(
-              _bytes > 0 ? 'Baixando... ${_formatMb(_bytes)}' : 'Preparando...',
+              dl.progress != null
+                  ? 'Baixando... ${(dl.progress! * 100).round()}%'
+                  : (dl.bytes > 0
+                        ? 'Baixando... ${_formatMb(dl.bytes)}'
+                        : 'Preparando...'),
               textAlign: TextAlign.center,
               style: TextStyle(
                 color: colorScheme.onSurfaceVariant,
@@ -383,7 +310,9 @@ class _DownloadScreenState extends ConsumerState<DownloadScreen> {
             ),
             const SizedBox(height: 12),
             OutlinedButton(
-              onPressed: _cancelDownload,
+              onPressed: ref
+                  .read(downloadNotifierProvider.notifier)
+                  .cancelCurrent,
               style: OutlinedButton.styleFrom(
                 minimumSize: const Size.fromHeight(48),
                 shape: RoundedRectangleBorder(
@@ -394,7 +323,7 @@ class _DownloadScreenState extends ConsumerState<DownloadScreen> {
             ),
           ],
         );
-      case _Step.saving:
+      case DownloadPhase.saving:
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
@@ -410,7 +339,7 @@ class _DownloadScreenState extends ConsumerState<DownloadScreen> {
             ),
           ],
         );
-      case _Step.downloaded:
+      case DownloadPhase.awaitingReview:
         return Row(
           children: [
             Expanded(
@@ -440,7 +369,10 @@ class _DownloadScreenState extends ConsumerState<DownloadScreen> {
             ),
           ],
         );
-      case _Step.ready:
+      case DownloadPhase.idle:
+      case DownloadPhase.playlistRunning:
+      case DownloadPhase.playlistDone:
+        if (_step != _Step.ready) return const SizedBox.shrink();
         return FilledButton.icon(
           onPressed: _download,
           icon: const Icon(Icons.download),
@@ -452,9 +384,6 @@ class _DownloadScreenState extends ConsumerState<DownloadScreen> {
             ),
           ),
         );
-      case _Step.idle:
-      case _Step.fetching:
-        return const SizedBox.shrink();
     }
   }
 }
