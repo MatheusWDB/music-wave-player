@@ -62,6 +62,11 @@ class MusicAudioHandler {
   // próxima.
   bool _pausedAtTrackEnd = false;
 
+  // Janela em que um avanço automático de faixa deve ser descartado porque o
+  // temporizador de duração pausou a reprodução no mesmo instante em que a
+  // faixa terminava (ver [pauseForSleepTimer] e [play]).
+  DateTime _sleepPauseUntil = DateTime.fromMillisecondsSinceEpoch(0);
+
   int? _sessionTrackId;
   int? _sessionRowId;
   int _sessionSecondsAccumulated = 0;
@@ -720,6 +725,15 @@ class MusicAudioHandler {
       'pos=${player.state.position.inMilliseconds}ms, '
       'dur=${player.state.duration.inMilliseconds}ms, ${_audioSnapshot()})',
     );
+    // O temporizador pausou durante a troca de faixa: a nova faixa fica
+    // carregada e pausada em 0:00 em vez de retomar a reprodução.
+    final sleepPauseActive = DateTime.now().isBefore(_sleepPauseUntil);
+    _sleepPauseUntil = DateTime.fromMillisecondsSinceEpoch(0);
+    if (isAutoAdvance && sleepPauseActive) {
+      _diag('play() descartado: temporizador pausou durante a troca de faixa');
+      _ref.read(playbackNotifierProvider.notifier).syncPlayingState(false);
+      return;
+    }
     if (_fadeOnPauseResume && isAutoAdvance && !_crossfadeInProgress) {
       // Fade ao avançar naturalmente: zera volume, toca, sobe gradualmente
       await player.setVolume(0);
@@ -733,6 +747,29 @@ class MusicAudioHandler {
       await player.setVolume(_baseVolume);
       await player.play();
     }
+  }
+
+  /// Pausa disparada pelo temporizador de duração.
+  ///
+  /// Não usa [pause]: o fade out awaitable dele nunca completa se o
+  /// [loadTrack] de uma troca de faixa simultânea cancelar o timer do fade,
+  /// e a pausa ficava pendurada enquanto a faixa nova tocava normalmente.
+  /// A janela de [_sleepPauseUntil] também cobre um avanço automático que já
+  /// estava a caminho (fade de fim de faixa) — ver [play].
+  Future<void> pauseForSleepTimer() async {
+    _diag(
+      'pauseForSleepTimer() chamado (pos=${player.state.position.inMilliseconds}ms, '
+      'dur=${player.state.duration.inMilliseconds}ms, ${_audioSnapshot()})',
+    );
+    _sleepPauseUntil = DateTime.now().add(const Duration(seconds: 15));
+    _crossfadeTimer?.cancel();
+    _crossfadeInProgress = false;
+    await player.pause();
+    await player.setVolume(_baseVolume);
+    // Pausa veio do temporizador, não do usuário: retoma do começo.
+    await seek(Duration.zero);
+    _effectiveEndTriggered = false;
+    _endOfTrackFadeStarted = false;
   }
 
   Future<void> pause() async {

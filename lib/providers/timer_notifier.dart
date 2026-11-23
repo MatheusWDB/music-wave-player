@@ -2,7 +2,6 @@ import 'dart:async';
 
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 import 'package:music_wave_player/providers/music_audio_handler_provider.dart';
-import 'package:music_wave_player/providers/playback_notifier.dart';
 import 'package:music_wave_player/providers/queue_notifier.dart';
 
 part 'timer_notifier.g.dart';
@@ -106,15 +105,9 @@ class TimerNotifier extends _$TimerNotifier {
     if (state.remainingSeconds <= 1) {
       _cancelTicker();
       state = const TimerState();
-      final audioHandler = ref.read(musicAudioHandlerProvider);
-      audioHandler.pause();
-      // Pausa veio do temporizador, não do usuário: não faz sentido retomar
-      // depois de onde parou. Busca a posição 0 agora (pra tela e o player
-      // refletirem isso na hora) e também salva pra retomada futura.
-      audioHandler.seek(Duration.zero);
-      ref
-          .read(playbackNotifierProvider.notifier)
-          .saveCurrentPositionForResume(0);
+      // Pausa, volta a faixa pra 0:00 e descarta um avanço automático que
+      // esteja acontecendo no mesmo instante (ver pauseForSleepTimer).
+      ref.read(musicAudioHandlerProvider).pauseForSleepTimer();
       return;
     }
     state = TimerState(
