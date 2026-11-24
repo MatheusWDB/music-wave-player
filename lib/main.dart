@@ -1,10 +1,12 @@
 import 'dart:async';
+import 'dart:ui';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:music_wave_player/screens/library_screen.dart';
 import 'package:music_wave_player/services/background_task_service.dart';
+import 'package:music_wave_player/services/diag_log.dart';
 import 'package:music_wave_player/theme/app_colors.dart';
 import 'package:music_wave_player/theme/app_theme.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -31,8 +33,38 @@ class AppMessenger {
   }
 }
 
+/// DIAGNÓSTICO TEMPORÁRIO — registra no log as mudanças de ciclo de vida do
+/// app e os avisos de pouca memória do sistema. Cruza com o `exit-info`.
+class _LifecycleLogger extends WidgetsBindingObserver {
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    DiagLog.player('ciclo de vida do app: ${state.name}');
+  }
+
+  @override
+  void didHaveMemoryPressure() {
+    DiagLog.player('sistema avisou: pouca memória');
+  }
+}
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // DIAGNÓSTICO TEMPORÁRIO — erros que hoje passam em silêncio vão pro log.
+  // O comportamento padrão continua (presentError / return false).
+  FlutterError.onError = (details) {
+    FlutterError.presentError(details);
+    DiagLog.error('FlutterError', details.exception, details.stack);
+  };
+  PlatformDispatcher.instance.onError = (error, stack) {
+    DiagLog.error('Erro não tratado', error, stack);
+    return false;
+  };
+  WidgetsBinding.instance.addObserver(_LifecycleLogger());
+  DiagLog.player(
+    'app iniciado (ciclo de vida inicial: '
+    '${WidgetsBinding.instance.lifecycleState?.name})',
+  );
 
   await SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
   SystemChrome.setSystemUIOverlayStyle(

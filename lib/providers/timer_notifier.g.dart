@@ -6,7 +6,7 @@ part of 'timer_notifier.dart';
 // RiverpodGenerator
 // **************************************************************************
 
-String _$timerNotifierHash() => r'b386ffd226963d733390d3807e777c655142cf04';
+String _$timerNotifierHash() => r'759f8937fe54b9450e462baa6e59930d68c33f37';
 
 /// Gerencia o temporizador de sono: por duração, fim da música atual ou
 /// fim da fila. Substitui o antigo [SleepTimerService] — depende de

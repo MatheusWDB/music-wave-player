@@ -1,6 +1,7 @@
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:music_wave_player/providers/music_audio_handler_provider.dart';
+import 'package:music_wave_player/services/diag_log.dart';
 
 part 'player_settings_notifier.g.dart';
 
@@ -51,6 +52,7 @@ class PlayerSettingsNotifier extends _$PlayerSettingsNotifier {
   void setPlaybackSpeed(double speed) {
     final current = state.valueOrNull;
     if (current == null) return;
+    DiagLog.player('config: velocidade ${current.playbackSpeed}x → ${speed}x');
     state = AsyncData(current.copyWith(playbackSpeed: speed));
     ref.read(musicAudioHandlerProvider).setSpeed(speed);
   }
@@ -58,6 +60,9 @@ class PlayerSettingsNotifier extends _$PlayerSettingsNotifier {
   Future<void> setCrossfadeDuration(int seconds) async {
     final current = state.valueOrNull;
     if (current == null) return;
+    DiagLog.player(
+      'config: crossfade ${current.crossfadeDuration}s → ${seconds}s',
+    );
     state = AsyncData(current.copyWith(crossfadeDuration: seconds));
     ref.read(musicAudioHandlerProvider).updateCrossfade(seconds);
     final prefs = await SharedPreferences.getInstance();
@@ -67,6 +72,9 @@ class PlayerSettingsNotifier extends _$PlayerSettingsNotifier {
   Future<void> setFadeOnPauseResume(bool enabled) async {
     final current = state.valueOrNull;
     if (current == null) return;
+    DiagLog.player(
+      'config: fade ao pausar/retomar ${current.fadeOnPauseResume} → $enabled',
+    );
     state = AsyncData(current.copyWith(fadeOnPauseResume: enabled));
     ref.read(musicAudioHandlerProvider).updateFadeOnPauseResume(enabled);
     final prefs = await SharedPreferences.getInstance();

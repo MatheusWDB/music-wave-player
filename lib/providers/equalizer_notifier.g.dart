@@ -6,7 +6,7 @@ part of 'equalizer_notifier.dart';
 // RiverpodGenerator
 // **************************************************************************
 
-String _$equalizerNotifierHash() => r'b6a082dd9cb33198e7f7d2e041b78e4d931b9d10';
+String _$equalizerNotifierHash() => r'f5a134493e44d051886316d5c2dbb03c843ddf6c';
 
 /// Gerencia o estado do equalizador gráfico: 10 bandas, presets prontos e
 /// persistência em [SharedPreferences]. Substitui o antigo [EqualizerService].

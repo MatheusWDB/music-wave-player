@@ -7,7 +7,7 @@ part of 'player_settings_notifier.dart';
 // **************************************************************************
 
 String _$playerSettingsNotifierHash() =>
-    r'aa2b709f9b8a3358c31ab77263a24b6f1ae418af';
+    r'c60040468f5894451cec5cc6c8c546eb85bc5065';
 
 /// Configurações gerais de reprodução que sobravam soltas no antigo
 /// [Configuration]: velocidade (não persistida — mesmo comportamento

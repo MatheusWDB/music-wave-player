@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 import 'package:music_wave_player/providers/music_audio_handler_provider.dart';
 import 'package:music_wave_player/providers/queue_notifier.dart';
+import 'package:music_wave_player/services/diag_log.dart';
 
 part 'timer_notifier.g.dart';
 
@@ -41,6 +42,11 @@ class TimerState {
 class TimerNotifier extends _$TimerNotifier {
   Timer? _ticker;
 
+  // DIAGNÓSTICO TEMPORÁRIO — compara o tempo real decorrido com o pedido,
+  // pra flagrar o timer do Dart atrasado se o Android suspender o app.
+  DateTime? _startedAt;
+  int _requestedSeconds = 0;
+
   @override
   TimerState build() {
     ref.onDispose(() => _ticker?.cancel());
@@ -50,6 +56,9 @@ class TimerNotifier extends _$TimerNotifier {
   /// Inicia temporizador por duração em segundos.
   void startDuration(int seconds) {
     _cancelTicker();
+    _startedAt = DateTime.now();
+    _requestedSeconds = seconds;
+    DiagLog.player('timer: iniciado por duração (${seconds}s)');
     state = TimerState(
       isActive: true,
       mode: SleepTimerMode.duration,
@@ -61,17 +70,23 @@ class TimerNotifier extends _$TimerNotifier {
   /// Pausa ao fim da música atual.
   void startEndOfTrack() {
     _cancelTicker();
+    DiagLog.player('timer: iniciado — fim da música');
     state = const TimerState(isActive: true, mode: SleepTimerMode.endOfTrack);
   }
 
   /// Pausa ao fim da fila.
   void startEndOfQueue() {
     _cancelTicker();
+    DiagLog.player('timer: iniciado — fim da fila');
     state = const TimerState(isActive: true, mode: SleepTimerMode.endOfQueue);
   }
 
   /// Cancela o temporizador ativo.
   void cancel() {
+    DiagLog.player(
+      'timer: cancelado (ativo=${state.isActive}, modo=${state.mode}, '
+      'restante=${state.remainingSeconds}s)',
+    );
     _cancelTicker();
     state = const TimerState();
   }
@@ -82,6 +97,7 @@ class TimerNotifier extends _$TimerNotifier {
     if (!state.isActive) return false;
 
     if (state.mode == SleepTimerMode.endOfTrack) {
+      DiagLog.player('timer: fim da música atingido — manda pausar');
       _cancelTicker();
       state = const TimerState();
       return true;
@@ -91,6 +107,7 @@ class TimerNotifier extends _$TimerNotifier {
       final queueState = ref.read(queueNotifierProvider);
       final isLast =
           queueState.currentQueueIndex >= queueState.playbackQueue.length - 1;
+      DiagLog.player('timer: fim da fila — última faixa=$isLast');
       if (isLast) {
         _cancelTicker();
         state = const TimerState();
@@ -103,12 +120,22 @@ class TimerNotifier extends _$TimerNotifier {
 
   void _onTick(Timer _) {
     if (state.remainingSeconds <= 1) {
+      final real = _startedAt == null
+          ? null
+          : DateTime.now().difference(_startedAt!).inSeconds;
+      DiagLog.player(
+        'timer: disparou (pedido=${_requestedSeconds}s, decorridoReal=${real}s)',
+      );
       _cancelTicker();
       state = const TimerState();
       // Pausa, volta a faixa pra 0:00 e descarta um avanço automático que
       // esteja acontecendo no mesmo instante (ver pauseForSleepTimer).
       ref.read(musicAudioHandlerProvider).pauseForSleepTimer();
       return;
+    }
+    // Batimento a cada 30 min: mostra se o timer do Dart continua andando.
+    if (state.remainingSeconds % 1800 == 0) {
+      DiagLog.player('timer: restante=${state.remainingSeconds}s');
     }
     state = TimerState(
       isActive: true,

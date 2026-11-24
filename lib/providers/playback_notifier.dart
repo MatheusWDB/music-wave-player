@@ -6,6 +6,7 @@ import 'package:music_wave_player/models/music_track.dart';
 import 'package:music_wave_player/models/playlist.dart';
 import 'package:music_wave_player/providers/music_audio_handler_provider.dart';
 import 'package:music_wave_player/providers/queue_notifier.dart';
+import 'package:music_wave_player/services/diag_log.dart';
 import 'package:music_wave_player/services/recently_played_service.dart';
 
 part 'playback_notifier.g.dart';
@@ -120,7 +121,13 @@ class PlaybackNotifier extends _$PlaybackNotifier {
     if (current == null) return;
 
     final exists = indexedTracks.any((t) => t.id == musicId);
-    if (!exists || trackPath == null) return;
+    if (!exists || trackPath == null) {
+      DiagLog.player(
+        'playTrack: abortado (id=$musicId, existeNaBiblioteca=$exists, '
+        'caminho=${trackPath != null})',
+      );
+      return;
+    }
 
     final audioHandler = ref.read(musicAudioHandlerProvider);
     final queueNotifier = ref.read(queueNotifierProvider.notifier);
@@ -205,6 +212,10 @@ class PlaybackNotifier extends _$PlaybackNotifier {
         .where((id) => indexedTracks.any((t) => t.id == id))
         .toList();
     if (validIds.isEmpty) return;
+    DiagLog.player(
+      'playPlaylist: faixas=${validIds.length}, aleatório=$shuffleActive, '
+      'randomStart=$randomStart',
+    );
 
     ref
         .read(queueNotifierProvider.notifier)
@@ -227,6 +238,10 @@ class PlaybackNotifier extends _$PlaybackNotifier {
         .map((t) => t.id!)
         .toList();
     if (visibleIds.isEmpty) return;
+    DiagLog.player(
+      'playTracks: faixas=${visibleIds.length}, aleatório=$shuffleActive, '
+      'randomStart=$randomStart',
+    );
 
     ref
         .read(queueNotifierProvider.notifier)
@@ -247,7 +262,13 @@ class PlaybackNotifier extends _$PlaybackNotifier {
     final queue = ref.read(queueNotifierProvider).playbackQueue;
     final firstId = queue.first;
     final path = pathForId(firstId);
-    if (path == null) return;
+    if (path == null) {
+      DiagLog.player(
+        '_startFromQueueTop: sem caminho para a faixa $firstId — abortado',
+      );
+      return;
+    }
+    DiagLog.player('_startFromQueueTop: faixa=$firstId');
 
     final audioHandler = ref.read(musicAudioHandlerProvider);
 
@@ -281,6 +302,11 @@ class PlaybackNotifier extends _$PlaybackNotifier {
   }) {
     final current = state.valueOrNull;
     if (current == null) return;
+
+    DiagLog.player(
+      'togglePlayPause: tocando=${current.isPlaying}, '
+      'faixa=${current.lastPlayedMusicId}, pos=${current.currentPositionMs}ms',
+    );
 
     final audioHandler = ref.read(musicAudioHandlerProvider);
     final queueNotifier = ref.read(queueNotifierProvider.notifier);
@@ -320,6 +346,9 @@ class PlaybackNotifier extends _$PlaybackNotifier {
       // Se a pausa atual veio do temporizador ao fim da faixa, avança para
       // a próxima em vez de retomar do zero.
       final pausedAtEnd = audioHandler.consumePausedAtTrackEnd();
+      DiagLog.player(
+        'togglePlayPause: retomando (pausadoNoFimDaFaixa=$pausedAtEnd)',
+      );
       if (pausedAtEnd) {
         playNextTrack(indexedTracks: indexedTracks);
       } else {
@@ -435,6 +464,10 @@ class PlaybackNotifier extends _$PlaybackNotifier {
 
     // Se passou de 3s, volta ao início da faixa atual
     if (current.currentPositionMs > 3000) {
+      DiagLog.player(
+        'playPreviousTrack: pos=${current.currentPositionMs}ms > 3s — '
+        'reinicia a faixa atual',
+      );
       audioHandler.seek(Duration.zero);
       return;
     }
@@ -444,15 +477,27 @@ class PlaybackNotifier extends _$PlaybackNotifier {
       if (current.repeatMode == 'All') {
         prev = queue.length - 1;
       } else {
+        DiagLog.player(
+          'playPreviousTrack: já é a primeira da fila — reinicia a faixa atual',
+        );
         audioHandler.seek(Duration.zero);
         return;
       }
     }
 
+    DiagLog.player(
+      'playPreviousTrack: índice ${queueState.currentQueueIndex} → $prev '
+      '(id ${queue[prev]}), fila=${queue.length}',
+    );
     queueNotifier.setCurrentIndex(prev);
     final trackId = queue[prev];
     final track = indexedTracks.where((t) => t.id == trackId).firstOrNull;
-    if (track == null) return;
+    if (track == null) {
+      DiagLog.player(
+        'playPreviousTrack: faixa #$trackId não está em indexedTracks — abortado',
+      );
+      return;
+    }
 
     playTrack(
       trackId,
@@ -477,9 +522,17 @@ class PlaybackNotifier extends _$PlaybackNotifier {
           'faixaAtual=${current.lastPlayedMusicId}, '
           'índiceNaFila=${queueState.currentQueueIndex}/${queue.length}',
         );
-    if (current.lastPlayedMusicId == null || queue.isEmpty) return;
+    if (current.lastPlayedMusicId == null || queue.isEmpty) {
+      DiagLog.player(
+        'trackDidFinish: sem faixa atual ou fila vazia — nada a fazer',
+      );
+      return;
+    }
 
     if (current.repeatMode == 'One') {
+      DiagLog.player(
+        'trackDidFinish: repeat One — repete a faixa ${current.lastPlayedMusicId}',
+      );
       final track = indexedTracks
           .where((t) => t.id == current.lastPlayedMusicId)
           .firstOrNull;
@@ -526,6 +579,7 @@ class PlaybackNotifier extends _$PlaybackNotifier {
     final result = ref
         .read(queueNotifierProvider.notifier)
         .remove(index: index, currentTrackId: current.lastPlayedMusicId);
+    DiagLog.player('removeFromQueue: índice=$index → ${result.runtimeType}');
 
     switch (result) {
       case QueueRemovePause():
@@ -547,8 +601,16 @@ class PlaybackNotifier extends _$PlaybackNotifier {
   void jumpToQueueIndex(int index, {required List<MusicTrack> indexedTracks}) {
     final queueNotifier = ref.read(queueNotifierProvider.notifier);
     final queue = ref.read(queueNotifierProvider).playbackQueue;
-    if (index < 0 || index >= queue.length) return;
+    if (index < 0 || index >= queue.length) {
+      DiagLog.player(
+        'jumpToQueueIndex: índice inválido ($index de ${queue.length})',
+      );
+      return;
+    }
 
+    DiagLog.player(
+      'jumpToQueueIndex: índice=$index (id ${queue[index]}), fila=${queue.length}',
+    );
     queueNotifier.setCurrentIndex(index);
     final trackId = queue[index];
     final track = indexedTracks.where((t) => t.id == trackId).firstOrNull;
@@ -570,6 +632,7 @@ class PlaybackNotifier extends _$PlaybackNotifier {
       'All' => 'One',
       _ => 'Off',
     };
+    DiagLog.player('toggleRepeatMode: ${current.repeatMode} → $next');
     state = AsyncData(current.copyWith(repeatMode: next));
   }
 
@@ -603,7 +666,12 @@ class PlaybackNotifier extends _$PlaybackNotifier {
   Future<void> saveCurrentPositionForResume(int ms) async {
     // Troca de faixa em andamento: a posição lida do player ainda é da
     // faixa anterior e seria gravada junto com o id da nova.
-    if (_switchingTracks > 0) return;
+    if (_switchingTracks > 0) {
+      DiagLog.player(
+        'posição de retomada NÃO salva (troca de faixa em andamento): ${ms}ms',
+      );
+      return;
+    }
     final current = state.valueOrNull;
     if (current != null) {
       state = AsyncData(current.copyWith(lastSeekPositionMs: ms));
@@ -624,11 +692,13 @@ class PlaybackNotifier extends _$PlaybackNotifier {
   Future<void> _saveLastPlayedMusicId(int id) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setInt(_kLastPlayedMusicIdKey, id);
+    DiagLog.player('última faixa salva: $id');
   }
 
   Future<void> _clearSavedLastPlayed() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_kLastPlayedMusicIdKey);
+    DiagLog.player('última faixa e posição de retomada apagadas');
     await prefs.remove(_kLastSeekPositionMsKey);
     await prefs.remove(_kLastSeekTrackIdKey);
   }
@@ -649,5 +719,6 @@ class PlaybackNotifier extends _$PlaybackNotifier {
   Future<void> _saveShuffleActive(bool active) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_kShuffleActiveKey, active);
+    DiagLog.player('aleatório salvo: $active');
   }
 }

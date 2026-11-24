@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:music_wave_player/providers/music_audio_handler_provider.dart';
+import 'package:music_wave_player/services/diag_log.dart';
 import 'package:music_wave_player/services/equalizer_service.dart';
 
 export 'package:music_wave_player/services/equalizer_service.dart'
@@ -128,6 +129,7 @@ class EqualizerNotifier extends _$EqualizerNotifier {
     final current = state.valueOrNull;
     if (current == null) return;
     final updated = current.copyWith(enabled: value);
+    DiagLog.player('equalizador: ${value ? 'ligado' : 'desligado'}');
     state = AsyncData(updated);
     await _applyToAudio(updated);
     final prefs = await SharedPreferences.getInstance();
@@ -143,6 +145,7 @@ class EqualizerNotifier extends _$EqualizerNotifier {
           List.filled(EqualizerService.bands.length, EqualizerService.flatGain),
     );
     final updated = current.copyWith(activePreset: preset, bandGains: gains);
+    DiagLog.player('equalizador: preset ${preset.name}');
     state = AsyncData(updated);
     await _applyToAudio(updated);
     await _persistPresetAndBands();
@@ -199,6 +202,7 @@ class EqualizerNotifier extends _$EqualizerNotifier {
   Future<void> reset() async {
     final current = state.valueOrNull;
     if (current == null) return;
+    DiagLog.player('equalizador: reset');
     final updated = current.copyWith(
       activePreset: EqualizerPreset.normal,
       bandGains: List.filled(

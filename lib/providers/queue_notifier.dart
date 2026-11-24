@@ -3,6 +3,7 @@ import 'dart:math';
 
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 import 'package:music_wave_player/models/music_track.dart';
+import 'package:music_wave_player/services/diag_log.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 part 'queue_notifier.g.dart';
@@ -90,6 +91,26 @@ class _QueueSplit {
 class QueueNotifier extends _$QueueNotifier {
   @override
   QueueState build() => const QueueState();
+
+  // ── Diagnóstico ───────────────────────────────────────────────────────────
+
+  // DIAGNÓSTICO TEMPORÁRIO — resumo da fila em volta da faixa atual (ids):
+  // índice, atual, duas anteriores e cinco próximas.
+  String _snap() {
+    final q = state.playbackQueue;
+    final i = state.currentQueueIndex;
+    final hasCurrent = i >= 0 && i < q.length;
+    final prev = hasCurrent ? q.sublist(max(0, i - 2), i) : <int>[];
+    final next = i + 1 < q.length
+        ? q.sublist(max(0, i + 1), min(q.length, i + 6))
+        : <int>[];
+    return 'índice=$i/${q.length}, atual=${hasCurrent ? q[i] : null}, '
+        'anteriores=$prev, próximas=$next, tocadas=${state.playedIds.length}';
+  }
+
+  // DIAGNÓSTICO TEMPORÁRIO — registra uma operação com a fila antes/depois.
+  void _logOp(String op, String before) =>
+      DiagLog.player('fila.$op: antes[$before] depois[${_snap()}]');
 
   // ── Persistência ──────────────────────────────────────────────────────────
 
@@ -190,6 +211,7 @@ class QueueNotifier extends _$QueueNotifier {
     required int? currentTrackId,
     bool isLibraryContext = true,
   }) {
+    final before = _snap();
     final ids = tracks.map((t) => t.id!).toList();
 
     List<int> queue;
@@ -218,6 +240,10 @@ class QueueNotifier extends _$QueueNotifier {
       currentQueueIndex: index,
     );
     unawaited(_persist());
+    _logOp(
+      'regenerate(atual=$currentTrackId, aleatório=$shuffleActive, biblioteca=$isLibraryContext, faixas=${tracks.length})',
+      before,
+    );
   }
 
   /// Define uma nova fila ordenada, aplicando shuffle se necessário.
@@ -230,9 +256,11 @@ class QueueNotifier extends _$QueueNotifier {
     required bool shuffleActive,
     bool randomStart = false,
   }) {
+    final before = _snap();
     if (orderedIds.isEmpty) {
       state = const QueueState();
       unawaited(_persist());
+      _logOp('setQueue(vazio)', before);
       return;
     }
     List<int> playbackQueue;
@@ -256,6 +284,10 @@ class QueueNotifier extends _$QueueNotifier {
       currentQueueIndex: 0,
     );
     unawaited(_persist());
+    _logOp(
+      'setQueue(faixas=${orderedIds.length}, aleatório=$shuffleActive, randomStart=$randomStart)',
+      before,
+    );
   }
 
   /// Ajusta a fila às faixas atualmente visíveis da biblioteca (após
@@ -267,6 +299,7 @@ class QueueNotifier extends _$QueueNotifier {
     required bool shuffleActive,
     required int? currentTrackId,
   }) {
+    final before = _snap();
     if (state.playbackQueue.isEmpty) {
       regenerate(
         tracks: tracks,
@@ -307,6 +340,10 @@ class QueueNotifier extends _$QueueNotifier {
       currentQueueIndex: index,
     );
     unawaited(_persist());
+    _logOp(
+      'syncWithLibrary(faixasVisíveis=${tracks.length}, atual=$currentTrackId, contextoBiblioteca=${state.isLibraryContext})',
+      before,
+    );
   }
 
   // ── Shuffle ───────────────────────────────────────────────────────────────
@@ -329,6 +366,7 @@ class QueueNotifier extends _$QueueNotifier {
   /// na mesma ordem; só o que vem depois dela é embaralhado. Devolve uma
   /// descrição pro log de diagnóstico.
   String applyShuffle() {
+    final before = _snap();
     final split = _split();
     if (split == null) return 'aleatório LIGADO: fila sem faixa atual';
     final rest = List.of(split.rest)..shuffle(Random());
@@ -337,6 +375,7 @@ class QueueNotifier extends _$QueueNotifier {
       currentQueueIndex: split.history.length,
     );
     unawaited(_persist());
+    _logOp('applyShuffle', before);
     return 'aleatório LIGADO: histórico=${split.history.length}, '
         'embaralhadas=${rest.length}';
   }
@@ -346,6 +385,7 @@ class QueueNotifier extends _$QueueNotifier {
   /// Faixas que não são do contexto (adicionadas à mão) vão pro fim, na
   /// ordem atual.
   String removeShuffle() {
+    final before = _snap();
     final split = _split();
     if (split == null) return 'aleatório DESLIGADO: fila sem faixa atual';
 
@@ -368,6 +408,7 @@ class QueueNotifier extends _$QueueNotifier {
       currentQueueIndex: split.history.length,
     );
     unawaited(_persist());
+    _logOp('removeShuffle', before);
     return 'aleatório DESLIGADO: histórico=${split.history.length}, '
         'em ordem original=${keyed.length}';
   }
@@ -378,6 +419,7 @@ class QueueNotifier extends _$QueueNotifier {
   /// faixa que acabou de tocar abra a nova rodada ([avoidFirstId]).
   /// Deixa o índice em -1: quem chama avança pro índice 0 em seguida.
   void restartCycle({required bool shuffle, int? avoidFirstId}) {
+    final before = _snap();
     final inQueue = state.playbackQueue.toSet();
     final contextSet = state.contextOrder.toSet();
     final base = state.contextOrder.where(inQueue.contains).toSet().toList();
@@ -403,11 +445,17 @@ class QueueNotifier extends _$QueueNotifier {
       currentQueueIndex: -1,
     );
     unawaited(_persist());
+    _logOp(
+      'restartCycle(aleatório=$shuffle, evitarPrimeira=$avoidFirstId)',
+      before,
+    );
   }
 
   // ── Operações de fila ─────────────────────────────────────────────────────
 
   void reorder(int oldIndex, int newIndex, int? currentTrackId) {
+    final before = _snap();
+    final rawNewIndex = newIndex;
     if (oldIndex < newIndex) newIndex -= 1;
     final queue = List.of(state.playbackQueue);
     final id = queue.removeAt(oldIndex);
@@ -423,14 +471,26 @@ class QueueNotifier extends _$QueueNotifier {
       currentQueueIndex: currentIndex,
     );
     unawaited(_persist());
+    final occurrences = currentTrackId == null
+        ? 0
+        : queue.where((e) => e == currentTrackId).length;
+    _logOp(
+      'reorder(de=$oldIndex, para=$rawNewIndex→$newIndex, movida=$id, '
+      'atualInformada=$currentTrackId, ocorrênciasDaAtual=$occurrences)',
+      before,
+    );
   }
 
   /// Remove item da fila. Retorna a ação necessária ao chamador.
   QueueRemoveResult remove({required int index, required int? currentTrackId}) {
     if (index < 0 || index >= state.playbackQueue.length) {
+      DiagLog.player(
+        'fila.remove: índice inválido ($index de ${state.playbackQueue.length})',
+      );
       return QueueRemoveNone();
     }
 
+    final before = _snap();
     final removingCurrent = index == state.currentQueueIndex;
     final queue = List.of(state.playbackQueue);
     queue.removeAt(index);
@@ -439,6 +499,7 @@ class QueueNotifier extends _$QueueNotifier {
       if (queue.isEmpty) {
         state = state.copyWith(playbackQueue: queue, currentQueueIndex: -1);
         unawaited(_persist());
+        _logOp('remove(índice=$index, atualRemovida=true, fila vazia)', before);
         return QueueRemovePause();
       } else {
         final newIndex = index.clamp(0, queue.length - 1);
@@ -447,6 +508,10 @@ class QueueNotifier extends _$QueueNotifier {
           currentQueueIndex: newIndex,
         );
         unawaited(_persist());
+        _logOp(
+          'remove(índice=$index, atualRemovida=true, toca=${queue[newIndex]})',
+          before,
+        );
         return QueueRemovePlayTrack(queue[newIndex]);
       }
     } else {
@@ -459,12 +524,14 @@ class QueueNotifier extends _$QueueNotifier {
         currentQueueIndex: currentIndex,
       );
       unawaited(_persist());
+      _logOp('remove(índice=$index, atualRemovida=false)', before);
       return QueueRemoveNone();
     }
   }
 
   void clear(int? currentTrackId) {
     if (currentTrackId == null) return;
+    final before = _snap();
     state = QueueState(
       playbackQueue: [currentTrackId],
       contextOrder: [currentTrackId],
@@ -473,17 +540,21 @@ class QueueNotifier extends _$QueueNotifier {
       currentQueueIndex: 0,
     );
     unawaited(_persist());
+    _logOp('clear(mantém=$currentTrackId)', before);
   }
 
   /// Esvazia a fila por completo — sem nenhuma faixa atual, usado quando
   /// a fila chega ao fim sem repeat (nada mais a tocar).
   void clearAll() {
+    final before = _snap();
     state = const QueueState();
     unawaited(_persist());
+    _logOp('clearAll', before);
   }
 
   void insertAfterCurrent(List<int> ids) {
     if (ids.isEmpty) return;
+    final before = _snap();
     final insertAt = state.currentQueueIndex + 1;
     final queue = List.of(state.playbackQueue);
     for (int i = 0; i < ids.length; i++) {
@@ -491,35 +562,43 @@ class QueueNotifier extends _$QueueNotifier {
     }
     state = state.copyWith(playbackQueue: queue);
     unawaited(_persist());
+    _logOp('insertAfterCurrent(ids=$ids, posição=$insertAt)', before);
   }
 
   void addToEnd(List<int> ids) {
     if (ids.isEmpty) return;
+    final before = _snap();
     state = state.copyWith(playbackQueue: [...state.playbackQueue, ...ids]);
     unawaited(_persist());
+    _logOp('addToEnd(ids=$ids)', before);
   }
 
   void removeTracksById(List<int> ids) {
+    final before = _snap();
     state = state.copyWith(
       playbackQueue: state.playbackQueue
           .where((id) => !ids.contains(id))
           .toList(),
     );
     unawaited(_persist());
+    _logOp('removeTracksById(ids=$ids)', before);
   }
 
   /// Move a cabeça da fila pro [index] e marca a faixa como tocada.
   void setCurrentIndex(int index) {
+    final before = _snap();
     final queue = state.playbackQueue;
     final Set<int> played = index >= 0 && index < queue.length
         ? {...state.playedIds, queue[index]}
         : state.playedIds;
     state = state.copyWith(currentQueueIndex: index, playedIds: played);
     unawaited(_persist());
+    _logOp('setCurrentIndex(índice=$index)', before);
   }
 
   void syncCurrentIndex(int? currentTrackId) {
     if (currentTrackId == null) return;
+    final before = _snap();
     final queue = state.playbackQueue;
     final current = state.currentQueueIndex;
     // Já está apontando pra essa faixa (inclusive se ela aparecer duas
@@ -535,5 +614,6 @@ class QueueNotifier extends _$QueueNotifier {
       playedIds: {...state.playedIds, currentTrackId},
     );
     unawaited(_persist());
+    _logOp('syncCurrentIndex(faixa=$currentTrackId)', before);
   }
 }

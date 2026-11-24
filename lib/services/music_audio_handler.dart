@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:mpv_audio_kit/mpv_audio_kit.dart';
@@ -11,8 +10,8 @@ import 'package:music_wave_player/providers/indexing_notifier.dart';
 import 'package:music_wave_player/providers/playback_notifier.dart';
 import 'package:music_wave_player/providers/player_settings_notifier.dart';
 import 'package:music_wave_player/providers/timer_notifier.dart';
+import 'package:music_wave_player/services/diag_log.dart';
 import 'package:music_wave_player/services/silence_detection_service.dart';
-import 'package:path_provider/path_provider.dart';
 
 class MusicAudioHandler {
   final Ref _ref;
@@ -52,6 +51,15 @@ class MusicAudioHandler {
   StreamSubscription? _durationSub;
   StreamSubscription? _mediaCommandSub;
 
+  // DIAGNÓSTICO TEMPORÁRIO — streams extras do mpv, só pra log.
+  final List<StreamSubscription> _diagSubs = [];
+  int _lastPeriodicPositionMs = -1;
+  int _stalledTicks = 0;
+  String? _lastMpvLogText;
+  DateTime _lastMpvLogAt = DateTime.fromMillisecondsSinceEpoch(0);
+  DateTime _mpvLogWindowStart = DateTime.fromMillisecondsSinceEpoch(0);
+  int _mpvLogCount = 0;
+
   Timer? _periodicSaveTimer;
 
   // Marca quando a pausa atual foi causada pelo temporizador ao atingir o
@@ -82,6 +90,7 @@ class MusicAudioHandler {
       ),
     );
     _initListeners();
+    _initDiagListeners();
     _applyGapless();
     _diag('MusicAudioHandler criado (processo/engine iniciado)');
   }
@@ -151,29 +160,83 @@ class MusicAudioHandler {
   // confirmar/fechar a investigação de loudness. Escreve em armazenamento
   // externo específico do app — não precisa de permissão extra, puxa com:
   //   adb pull /storage/emulated/0/Android/data/br.com.hematsu.music_wave_player/files/loudness_log.txt
-  Future<void> _logLoudness(String line) async {
-    try {
-      final dir = await getExternalStorageDirectory();
-      if (dir == null) return;
-      final file = File('${dir.path}/loudness_log.txt');
-      final timestamp = DateTime.now().toIso8601String();
-      await file.writeAsString('$timestamp  $line\n', mode: FileMode.append);
-    } catch (_) {
-      // Log é só diagnóstico — nunca deve derrubar a reprodução.
-    }
-  }
+  Future<void> _logLoudness(String line) => DiagLog.write(line);
 
   /// Log de diagnóstico geral do player (avanço de faixa, watchdog,
   /// comandos). Vai pro mesmo arquivo do [_logLoudness], com a tag [Player]
   /// pra diferenciar. TEMPORÁRIO — remover junto com o resto do diagnóstico.
-  void _diag(String message) {
-    debugPrint('[Player] $message');
-    unawaited(_logLoudness('[Player] $message'));
-  }
+  void _diag(String message) => DiagLog.player(message);
 
   /// Versão pública de [_diag], pra PlaybackNotifier/QueueNotifier
   /// registrarem no mesmo arquivo de log.
   void diag(String message) => _diag(message);
+
+  /// DIAGNÓSTICO TEMPORÁRIO — quem chamou o método que está logando (dois
+  /// níveis acima de [_caller]). Separa pausa do usuário, do temporizador,
+  /// da notificação etc. Só vale se chamado no começo do método.
+  String _caller() {
+    final lines = StackTrace.current.toString().split('\n');
+    if (lines.length < 3) return '?';
+    final frame = lines[2].trim();
+    return frame.length > 110 ? '${frame.substring(0, 110)}…' : frame;
+  }
+
+  /// DIAGNÓSTICO TEMPORÁRIO — streams do mpv que só servem pra log: erros,
+  /// fim de arquivo (de qualquer tipo), saída de áudio, cache e mensagens
+  /// do engine (limitadas, pra não inflar o arquivo).
+  void _initDiagListeners() {
+    _diagSubs.add(
+      player.stream.error.listen((e) {
+        if (e is MpvEndFileError) {
+          _diag(
+            'mpv erro (fim de arquivo): reason=${e.reason}, code=${e.code}, '
+            'carga=${e.isLoadingError}, saídaDeÁudio=${e.isAudioOutputError}, '
+            'formato=${e.isFormatError}',
+          );
+        } else if (e is MpvLogError) {
+          _diag('mpv erro (log): ${e.message}');
+        }
+      }),
+    );
+    _diagSubs.add(
+      player.stream.endFile.listen((event) {
+        _diag(
+          'mpv fim de arquivo: reason=${event.reason}, error=${event.error}, '
+          'pos=${player.state.position.inMilliseconds}ms, '
+          'dur=${player.state.duration.inMilliseconds}ms',
+        );
+      }),
+    );
+    _diagSubs.add(
+      player.stream.audioOutputState.listen((state) {
+        _diag('saída de áudio: $state');
+      }),
+    );
+    _diagSubs.add(
+      player.stream.pausedForCache.listen((paused) {
+        _diag('pausedForCache=$paused');
+      }),
+    );
+    _diagSubs.add(
+      player.stream.log.listen((entry) {
+        final now = DateTime.now();
+        final text = entry.text.trim();
+        if (text == _lastMpvLogText &&
+            now.difference(_lastMpvLogAt) < const Duration(seconds: 5)) {
+          return;
+        }
+        _lastMpvLogText = text;
+        _lastMpvLogAt = now;
+        // No máximo 20 mensagens do engine por minuto.
+        if (now.difference(_mpvLogWindowStart) > const Duration(minutes: 1)) {
+          _mpvLogWindowStart = now;
+          _mpvLogCount = 0;
+        }
+        if (++_mpvLogCount > 20) return;
+        _diag('mpv log [${entry.prefix}] ${entry.level.mpvValue}: $text');
+      }),
+    );
+  }
 
   /// Foto dos valores de volume que o plugin enxerga — soft (0-100),
   /// pré-amp em dB da normalização, e volume/mudo do mixer do sistema
@@ -226,6 +289,10 @@ class MusicAudioHandler {
   /// Fade out verdadeiramente awaitable via Completer interno.
   /// Só completa quando o volume chega a 0.
   Future<void> _fadeOut(int durationSeconds) async {
+    if (_crossfadeTimer?.isActive ?? false) {
+      _diag('fadeOut: fade anterior ainda ativo — cancelado');
+    }
+    _diag('fadeOut iniciado (${durationSeconds}s, vol=${player.state.volume})');
     _crossfadeTimer?.cancel();
     _crossfadeInProgress = true;
 
@@ -242,6 +309,7 @@ class MusicAudioHandler {
         t.cancel();
         await player.setVolume(0);
         _crossfadeInProgress = false;
+        _diag('fadeOut concluído');
         if (!completer.isCompleted) completer.complete();
       } else {
         await player.setVolume(current);
@@ -253,6 +321,10 @@ class MusicAudioHandler {
 
   /// Fade in de 0 até [_baseVolume] ao longo de [durationSeconds].
   Future<void> _fadeIn(int durationSeconds) async {
+    if (_crossfadeTimer?.isActive ?? false) {
+      _diag('fadeIn: fade anterior ainda ativo — cancelado');
+    }
+    _diag('fadeIn iniciado (${durationSeconds}s)');
     _crossfadeTimer?.cancel();
     _crossfadeInProgress = true;
     await player.setVolume(0);
@@ -302,6 +374,9 @@ class MusicAudioHandler {
           if (remaining.inSeconds <= _crossfadeDuration &&
               remaining.inSeconds > 0) {
             _endOfTrackFadeStarted = true;
+            _diag(
+              'fade de fim de faixa iniciado (restante=${remaining.inMilliseconds}ms)',
+            );
             _fadeOut(_crossfadeDuration);
           }
         }
@@ -318,6 +393,9 @@ class MusicAudioHandler {
             effectiveEndMs < durationMs - 1000 &&
             pos.inMilliseconds >= effectiveEndMs) {
           _effectiveEndTriggered = true;
+          _diag(
+            'effectiveEnd atingido (pos=${pos.inMilliseconds}ms, effectiveEnd=${effectiveEndMs}ms, dur=${durationMs}ms)',
+          );
           // Corte abrupto no ponto exato soa estranho (ex: cauda de
           // reverb ainda decaindo). Um fade curto disfarça a transição.
           unawaited(
@@ -390,6 +468,11 @@ class MusicAudioHandler {
     });
 
     _playingSub = player.stream.playing.listen((playing) {
+      _diag(
+        'player.playing=$playing (playWhenReady=${player.state.playWhenReady}, '
+        'pos=${player.state.position.inMilliseconds}ms, '
+        'dur=${player.state.duration.inMilliseconds}ms)',
+      );
       if (playing) {
         _resumeSession();
         _startPeriodicSave();
@@ -426,6 +509,7 @@ class MusicAudioHandler {
       final position = player.state.position;
       final gapMs = (duration - position).inMilliseconds;
       final isNearEnd = duration > Duration.zero && gapMs <= 3000;
+      _diag('completed recebido (gap=${gapMs}ms, perto do fim=$isNearEnd)');
 
       if (!isNearEnd) {
         // Gap grande: pode ser um "completed" residual pós-open() (ver
@@ -446,7 +530,13 @@ class MusicAudioHandler {
             ? Duration.zero
             : DateTime.now().difference(_currentTrackLoadedAt!);
         final looksSpurious = elapsedSinceLoad < const Duration(seconds: 3);
-        if (looksSpurious) return;
+        if (looksSpurious) {
+          _diag(
+            'completed ignorado como residual: gap=${gapMs}ms, '
+            'desdeCarga=${elapsedSinceLoad.inMilliseconds}ms',
+          );
+          return;
+        }
         // Tratado como fim real. Não mexe mais em durationMs aqui — isso
         // corrompia a duração de verdade do arquivo com o ponto onde o
         // decoder parou. Quem cuida de identificar/pular esse tipo de
@@ -501,10 +591,20 @@ class MusicAudioHandler {
   /// segundo e meio, ou fim já emitido), pra não gravar o "final" como
   /// ponto de retomada.
   void _savePositionOnPause() {
-    if (_trackFinishEmitted) return;
     final durationMs = player.state.duration.inMilliseconds;
     final positionMs = player.state.position.inMilliseconds;
-    if (durationMs <= 0 || positionMs >= durationMs - 1500) return;
+    if (_trackFinishEmitted) {
+      _diag(
+        'posição NÃO salva ao pausar: fim da faixa já emitido (pos=${positionMs}ms)',
+      );
+      return;
+    }
+    if (durationMs <= 0 || positionMs >= durationMs - 1500) {
+      _diag(
+        'posição NÃO salva ao pausar: perto do fim (${positionMs}ms de ${durationMs}ms)',
+      );
+      return;
+    }
     _diag('posição salva ao pausar: ${positionMs}ms de ${durationMs}ms');
     unawaited(
       _ref
@@ -583,6 +683,9 @@ class MusicAudioHandler {
     _stuckAtEndWatchdog?.cancel();
     _stuckAtEndWatchdog = null;
     // Cancela qualquer fade em andamento e reseta flags para a nova faixa
+    if (_crossfadeTimer?.isActive ?? false) {
+      _diag('loadTrack: fade em andamento cancelado pela troca de faixa');
+    }
     _crossfadeTimer?.cancel();
     _crossfadeInProgress = false;
     _endOfTrackFadeStarted = false;
@@ -723,7 +826,8 @@ class MusicAudioHandler {
     _diag(
       'play() chamado (autoAdvance=$isAutoAdvance, '
       'pos=${player.state.position.inMilliseconds}ms, '
-      'dur=${player.state.duration.inMilliseconds}ms, ${_audioSnapshot()})',
+      'dur=${player.state.duration.inMilliseconds}ms, ${_audioSnapshot()}, '
+      'origem=${_caller()})',
     );
     // O temporizador pausou durante a troca de faixa: a nova faixa fica
     // carregada e pausada em 0:00 em vez de retomar a reprodução.
@@ -775,7 +879,8 @@ class MusicAudioHandler {
   Future<void> pause() async {
     _diag(
       'pause() chamado (pos=${player.state.position.inMilliseconds}ms, '
-      'dur=${player.state.duration.inMilliseconds}ms, ${_audioSnapshot()})',
+      'dur=${player.state.duration.inMilliseconds}ms, ${_audioSnapshot()}, '
+      'origem=${_caller()})',
     );
     if (_fadeOnPauseResume && !_crossfadeInProgress) {
       await _fadeOut(1);
@@ -787,6 +892,10 @@ class MusicAudioHandler {
   }
 
   Future<void> seek(Duration position) async {
+    _diag(
+      'seek() chamado (para=${position.inMilliseconds}ms, '
+      'de=${player.state.position.inMilliseconds}ms, origem=${_caller()})',
+    );
     await player.seek(position);
     _saveSeekForResume(position);
   }
@@ -825,7 +934,7 @@ class MusicAudioHandler {
   Future<void> stop() async {
     _diag(
       'stop() chamado (pos=${player.state.position.inMilliseconds}ms, '
-      'dur=${player.state.duration.inMilliseconds}ms)',
+      'dur=${player.state.duration.inMilliseconds}ms, origem=${_caller()})',
     );
     _crossfadeTimer?.cancel();
     _stopPeriodicSave();
@@ -860,6 +969,7 @@ class MusicAudioHandler {
   }
 
   void _startSession(int trackId) {
+    _diag('sessão iniciada: faixa=$trackId');
     _sessionTrackId = trackId;
     _sessionRowId = null;
     _sessionSecondsAccumulated = 0;
@@ -886,6 +996,9 @@ class MusicAudioHandler {
         trackId: _sessionTrackId!,
         secondsPlayed: current,
       );
+      _diag(
+        'sessão inserida: faixa=$_sessionTrackId, ${current}s, linha=$_sessionRowId',
+      );
     } else {
       await PlaySessionDatabase.instance.updateSessionSeconds(
         id: _sessionRowId!,
@@ -900,6 +1013,10 @@ class MusicAudioHandler {
     final trackId = _sessionTrackId;
     if (trackId != null) {
       final total = _sessionSecondsAccumulated;
+      _diag(
+        'sessão finalizada: faixa=$trackId, acumulado=${total}s, '
+        'salvo=${_sessionSecondsSaved}s',
+      );
       if (total > 0 && total != _sessionSecondsSaved) {
         if (_sessionRowId == null) {
           await PlaySessionDatabase.instance.insertSession(
@@ -927,6 +1044,23 @@ class MusicAudioHandler {
     _periodicSaveTimer ??= Timer.periodic(const Duration(seconds: 5), (
       _,
     ) async {
+      // Posição que não anda com o player "tocando" = travamento no meio da
+      // faixa. Loga na primeira vez e depois a cada minuto.
+      final posMs = player.state.position.inMilliseconds;
+      if (posMs == _lastPeriodicPositionMs) {
+        _stalledTicks++;
+        if (_stalledTicks == 1 || _stalledTicks % 12 == 0) {
+          _diag(
+            'posição parada há ${_stalledTicks * 5}s: pos=${posMs}ms, '
+            'playing=${player.state.playing}, '
+            'playWhenReady=${player.state.playWhenReady}, '
+            'pausedForCache=${player.state.pausedForCache}',
+          );
+        }
+      } else {
+        _stalledTicks = 0;
+      }
+      _lastPeriodicPositionMs = posMs;
       await _ref
           .read(playbackNotifierProvider.notifier)
           .saveCurrentPositionForResume(player.state.position.inMilliseconds);
@@ -942,6 +1076,8 @@ class MusicAudioHandler {
   void _stopPeriodicSave() {
     _periodicSaveTimer?.cancel();
     _periodicSaveTimer = null;
+    _lastPeriodicPositionMs = -1;
+    _stalledTicks = 0;
   }
 
   // ── Dispose ───────────────────────────────────────────────────────────────
@@ -956,6 +1092,9 @@ class MusicAudioHandler {
     await _completedSub?.cancel();
     await _durationSub?.cancel();
     await _mediaCommandSub?.cancel();
+    for (final sub in _diagSubs) {
+      await sub.cancel();
+    }
     await player.dispose();
   }
 }
